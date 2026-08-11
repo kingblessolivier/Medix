@@ -52,18 +52,29 @@ export function AppShell({
   groups = PHARMACY_NAV,
   active,
   onNavigate,
+  organizationName,
+  userName,
+  onSignOut,
   children,
 }: {
   groups?: NavGroup[];
   active: string;
   onNavigate: (id: string) => void;
+  organizationName?: string;
+  userName?: string;
+  onSignOut?: () => void;
   children: ReactNode;
 }) {
   return (
     <div className="flex min-h-screen bg-app">
-      <Sidebar groups={groups} active={active} onNavigate={onNavigate} />
+      <Sidebar
+        groups={groups}
+        active={active}
+        onNavigate={onNavigate}
+        organizationName={organizationName}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
+        <TopBar userName={userName} onSignOut={onSignOut} />
         <main className="mx-auto w-full max-w-content flex-1 p-6">{children}</main>
         <StatusBar />
       </div>
@@ -77,10 +88,12 @@ function Sidebar({
   groups,
   active,
   onNavigate,
+  organizationName,
 }: {
   groups: NavGroup[];
   active: string;
   onNavigate: (id: string) => void;
+  organizationName?: string;
 }) {
   return (
     /* Tinted, not white — the sidebar is part of the application shell,
@@ -89,9 +102,14 @@ function Sidebar({
       aria-label="Main"
       className="z-nav hidden w-sidebar shrink-0 border-r border-border bg-nav py-4 md:block"
     >
-      <div className="flex items-center gap-2 px-4 pb-4">
-        <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-brand" />
-        <span className="text-section font-semibold tracking-tight">Medix</span>
+      <div className="px-4 pb-4">
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-brand" />
+          <span className="text-section font-semibold tracking-tight">Medix</span>
+        </div>
+        {organizationName && (
+          <p className="mt-0.5 truncate text-help text-text-3">{organizationName}</p>
+        )}
       </div>
 
       {groups.map((group) => (
@@ -137,7 +155,7 @@ function Sidebar({
 
 /* -- Top bar ----------------------------------------------------------- */
 
-function TopBar() {
+function TopBar({ userName, onSignOut }: { userName?: string; onSignOut?: () => void }) {
   return (
     /* Disappears into the environment — same neutral family as the
      * workspace, separated by a 1px divider. */
@@ -160,12 +178,27 @@ function TopBar() {
         <button type="button" aria-label="Notifications" className="text-text-2 hover:text-text">
           <Bell size={17} strokeWidth={1.8} />
         </button>
-        <span className="grid h-7 w-7 place-items-center rounded-full bg-brand-weak text-help font-semibold text-brand-text">
-          MU
-        </span>
+        <button
+          type="button"
+          onClick={onSignOut}
+          title={userName ? `${userName} — sign out` : "Sign out"}
+          aria-label="Sign out"
+          className="grid h-7 w-7 place-items-center rounded-full bg-brand-weak text-help font-semibold text-brand-text hover:opacity-80"
+        >
+          {initials(userName)}
+        </button>
       </div>
     </header>
   );
+}
+
+function initials(name?: string): string {
+  if (!name) return "—";
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
 function ThemeToggle() {
