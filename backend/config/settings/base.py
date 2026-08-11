@@ -42,6 +42,7 @@ LOCAL_APPS = [
     "catalog",
     "inventory",
     "sales",
+    "fiscal",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -169,6 +170,11 @@ USE_I18N = False
 USE_TZ = True
 
 DEFAULT_CURRENCY = "RWF"
+
+# Integration backends. Never point a non-production environment at RRA
+# production or a live payment provider.
+FISCAL_BACKEND = env("FISCAL_BACKEND", default="mock")
+PAYMENTS_BACKEND = env("PAYMENTS_BACKEND", default="mock")
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

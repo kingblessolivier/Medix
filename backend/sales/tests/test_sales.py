@@ -18,8 +18,9 @@ from core.quantity import Quantity
 from inventory import services as inventory
 from inventory.models import MovementKind, StockMovement
 from inventory.tests.factories import make_batch, make_location, make_org, make_product, uom
-from sales import services
+from sales import payments, services
 from sales.models import (
+    PaymentMethod,
     ControlledDeliveryEntry,
     Patient,
     Prescription,
@@ -113,9 +114,17 @@ class TestOverTheCounter:
         )
         completed = services.complete_sale(sale=sale, performed_by=counter["cashier"])
 
-        assert completed.status == SaleStatus.COMPLETED
+        # Goods have left; nothing is tendered yet.
+        assert completed.status == SaleStatus.PENDING_PAYMENT
         assert completed.number.startswith("SAL-")
         assert completed.total == 720
+
+        payments.take_payment(
+            sale=completed, method=PaymentMethod.CASH, amount=720,
+            performed_by=counter["cashier"],
+        )
+        completed.refresh_from_db()
+        assert completed.status == SaleStatus.COMPLETED
 
     def test_stock_leaves_through_the_ledger(self, counter):
         product = make_product(counter["org"], "Paracetamol 500mg", legal_status=LegalStatus.OTC)
@@ -257,7 +266,7 @@ class TestPrescriptionGating:
             prescription=prescription,
         )
 
-        assert completed.status == SaleStatus.COMPLETED
+        assert completed.status == SaleStatus.PENDING_PAYMENT
         assert completed.pharmacist == counter["pharmacist"]
 
     def test_nothing_moves_when_a_gate_refuses(self, counter):

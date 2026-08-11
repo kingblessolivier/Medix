@@ -281,7 +281,8 @@ def complete_sale(
       - every controlled line produces exactly one register entry;
       - stock leaves through the ledger, never by decrement.
     """
-    if sale.status == SaleStatus.COMPLETED:
+    if sale.status in (SaleStatus.COMPLETED, SaleStatus.PENDING_PAYMENT):
+        # Already posted. Re-completing must not move stock twice.
         return sale
     if sale.status != SaleStatus.DRAFT:
         raise SaleNotDraft()
@@ -334,11 +335,22 @@ def complete_sale(
     sale.number = sequences.next_number(sale.organization, "SALE")
     sale.pharmacist = pharmacist
     sale.prescription = prescription
-    sale.status = SaleStatus.COMPLETED
-    sale.completed_at = timezone.now()
     sale.modified_by = performed_by
     if idempotency_key:
         sale.idempotency_key = idempotency_key
+
+    # Goods have left the counter. Whether the sale is *settled* depends on
+    # what has actually been paid — a sale with nothing tendered is not
+    # revenue, and day end would otherwise count it as such.
+    from sales import payments as payment_services
+
+    settled = payment_services.amount_settled(sale)
+    if settled >= sale.total:
+        sale.status = SaleStatus.COMPLETED
+        sale.completed_at = timezone.now()
+    else:
+        sale.status = SaleStatus.PENDING_PAYMENT
+
     sale.save(
         update_fields=[
             "number",
