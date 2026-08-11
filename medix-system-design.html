@@ -1,0 +1,739 @@
+<title>Medix — System & Design Specification</title>
+<style>
+:root{
+  --app:#F4F6F8; --nav:#F0F3F6; --top:#F7F8FA; --content:#F8FAFC; --surface:#FFFFFF;
+  --hover:#EEF2F6; --selected:#E8F1FF; --border:#DCE2E8; --hair:#E4E8EC;
+  --text:#17212B; --text2:#5F6B76; --text3:#8A959E;
+  --brand:#0078D4; --brand-weak:#E8F1FF; --brand-text:#0F5A9C;
+  --ok:#059669; --warn:#D97706; --bad:#DC2626;
+  --ok-bg:#E7F5EF; --warn-bg:#FBF0E0; --bad-bg:#FBEAEA;
+  --page:#EDF0F3; --code:#F1F4F7;
+  --sans:"Segoe UI Variable Text","Segoe UI",-apple-system,system-ui,"Helvetica Neue",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",monospace;
+  --r1:6px; --r2:8px; --r3:10px; --r4:12px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --app:#14181B; --nav:#101418; --top:#171B1F; --content:#1A1F24; --surface:#1E242A;
+    --hover:#252C33; --selected:#12314C; --border:#2B333A; --hair:#242B31;
+    --text:#E6EBEF; --text2:#96A2AC; --text3:#6E7A84;
+    --brand:#4CA6E8; --brand-weak:#12314C; --brand-text:#8CC6F0;
+    --ok:#34C88A; --warn:#DFA23A; --bad:#EA6E66;
+    --ok-bg:#12291F; --warn-bg:#2A2013; --bad-bg:#2C1817;
+    --page:#0D1114; --code:#181D22;
+  }
+}
+:root[data-theme="dark"]{
+  --app:#14181B; --nav:#101418; --top:#171B1F; --content:#1A1F24; --surface:#1E242A;
+  --hover:#252C33; --selected:#12314C; --border:#2B333A; --hair:#242B31;
+  --text:#E6EBEF; --text2:#96A2AC; --text3:#6E7A84;
+  --brand:#4CA6E8; --brand-weak:#12314C; --brand-text:#8CC6F0;
+  --ok:#34C88A; --warn:#DFA23A; --bad:#EA6E66;
+  --ok-bg:#12291F; --warn-bg:#2A2013; --bad-bg:#2C1817;
+  --page:#0D1114; --code:#181D22;
+}
+:root[data-theme="light"]{
+  --app:#F4F6F8; --nav:#F0F3F6; --top:#F7F8FA; --content:#F8FAFC; --surface:#FFFFFF;
+  --hover:#EEF2F6; --selected:#E8F1FF; --border:#DCE2E8; --hair:#E4E8EC;
+  --text:#17212B; --text2:#5F6B76; --text3:#8A959E;
+  --brand:#0078D4; --brand-weak:#E8F1FF; --brand-text:#0F5A9C;
+  --ok:#059669; --warn:#D97706; --bad:#DC2626;
+  --ok-bg:#E7F5EF; --warn-bg:#FBF0E0; --bad-bg:#FBEAEA;
+  --page:#EDF0F3; --code:#F1F4F7;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{display:grid;grid-template-columns:212px minmax(0,1fr);max-width:1240px;margin:0 auto;background:var(--app);min-height:100vh;border-left:1px solid var(--border);border-right:1px solid var(--border)}
+.sidenav{background:var(--nav);border-right:1px solid var(--border);padding:20px 0;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brandmark{padding:0 16px 18px;display:flex;align-items:center;gap:8px}
+.brandmark b{font-size:15px;font-weight:600;letter-spacing:-.02em}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--brand)}
+.navgrp{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);padding:14px 16px 5px;font-weight:600}
+.sidenav a{display:block;padding:6px 16px;font-size:12.5px;color:var(--text2);text-decoration:none;border-left:2px solid transparent}
+.sidenav a:hover{background:var(--hover);color:var(--text)}
+.sidenav a:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.main{min-width:0}
+.topbar{background:var(--top);border-bottom:1px solid var(--border);padding:12px 32px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:5}
+.topbar .t{font-size:12.5px;color:var(--text2)}
+.themebtn{margin-left:auto;background:var(--hover);border:1px solid var(--border);color:var(--text2);font:inherit;font-size:12px;padding:4px 11px;border-radius:var(--r1);cursor:pointer}
+.themebtn:hover{color:var(--text)}
+.themebtn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.body{padding:34px 32px 80px}
+section{margin-bottom:52px;scroll-margin-top:60px}
+h1{font-size:27px;font-weight:600;letter-spacing:-.025em;margin:0 0 6px;text-wrap:balance}
+h2{font-size:19px;font-weight:600;letter-spacing:-.018em;margin:0 0 4px;text-wrap:balance}
+h3{font-size:13.5px;font-weight:600;margin:26px 0 9px;letter-spacing:-.005em}
+.lede{font-size:14.5px;color:var(--text2);max-width:66ch;margin:0 0 22px}
+.sub{font-size:13px;color:var(--text2);max-width:68ch;margin:0 0 20px}
+p{max-width:68ch;color:var(--text2);font-size:13.5px}
+p strong{color:var(--text);font-weight:600}
+.rule{height:1px;background:var(--border);margin:0 0 22px}
+.eyebrow{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--brand);font-weight:600;margin-bottom:7px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);padding:20px 22px}
+.mock{background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden}
+.mockbar{background:var(--content);border-bottom:1px solid var(--border);padding:6px 12px;font-size:10.5px;color:var(--text3);letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:12px}
+.swatch{border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;background:var(--surface)}
+.chip{height:52px}
+.swatch .meta{padding:8px 10px;border-top:1px solid var(--hair)}
+.swatch .nm{font-size:12px;font-weight:600}
+.swatch .hx{font-family:var(--mono);font-size:11px;color:var(--text2)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+.tw{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
+th{text-align:left;font-size:11px;font-weight:600;color:var(--text2);padding:8px 12px;background:var(--content);border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:8px 12px;border-top:1px solid var(--hair);vertical-align:top}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+code,.m{font-family:var(--mono);font-size:12px;background:var(--code);padding:1px 5px;border-radius:4px;color:var(--text)}
+pre{font-family:var(--mono);font-size:11.5px;line-height:1.65;background:var(--code);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;overflow-x:auto;color:var(--text2);margin:0}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px}
+.p-ok{background:var(--ok-bg);color:var(--ok)}
+.p-warn{background:var(--warn-bg);color:var(--warn)}
+.p-bad{background:var(--bad-bg);color:var(--bad)}
+.p-n{background:var(--hover);color:var(--text2)}
+.sd{font-size:15px;line-height:0}
+.note{border-left:2px solid var(--brand);background:var(--brand-weak);padding:12px 16px;border-radius:0;font-size:13px;color:var(--text);max-width:70ch}
+.warnbox{border-left:2px solid var(--warn);background:var(--warn-bg);padding:12px 16px;font-size:13px;color:var(--text);max-width:70ch}
+ul{padding-left:18px;color:var(--text2);font-size:13.5px;max-width:68ch}
+li{margin-bottom:5px}
+li strong{color:var(--text);font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 16px;font-size:12.5px;align-items:baseline}
+.kv dt{color:var(--text2)}
+.kv dd{margin:0;font-family:var(--mono);font-size:11.5px}
+.pcard{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden}
+.pimg{height:74px;background:var(--content);border-bottom:1px solid var(--hair);display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:10.5px;letter-spacing:.05em}
+.pbody{padding:9px 11px 11px}
+.pnm{font-size:12.5px;font-weight:600;line-height:1.35}
+.pmeta{font-size:11.5px;color:var(--text2);margin-top:1px}
+.prow{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px}
+.pprice{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.pstock{font-size:11px;color:var(--text2)}
+.padd{margin-top:9px;width:100%;background:transparent;border:1px solid var(--border);color:var(--text);font:inherit;font-size:11.5px;font-weight:600;padding:5px;border-radius:var(--r1);cursor:pointer}
+.padd:hover{background:var(--hover);border-color:var(--brand);color:var(--brand)}
+.padd:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--r1);overflow:hidden}
+.seg span{font-size:11px;padding:3px 11px;color:var(--text2)}
+.seg span.on{background:var(--selected);color:var(--brand-text);font-weight:600}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-family:var(--mono);font-size:11px;color:var(--text2)}
+.flow b{background:var(--surface);border:1px solid var(--border);border-radius:var(--r1);padding:4px 9px;font-weight:600;color:var(--text)}
+.flow i{color:var(--text3);font-style:normal}
+.step{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--hair)}
+.stepn{font-family:var(--mono);font-size:11px;color:var(--text3);padding-top:2px;min-width:20px}
+.tl{display:flex;align-items:center;gap:0;font-size:11px;color:var(--text2);flex-wrap:wrap}
+.tl .n{display:flex;align-items:center;gap:5px}
+.tl .bar{width:20px;height:1px;background:var(--border)}
+.tl .d{width:7px;height:7px;border-radius:50%;background:var(--brand)}
+.tl .d.off{background:var(--border)}
+@media (max-width:880px){
+  .wrap{grid-template-columns:1fr}
+  .sidenav{display:none}
+  .body{padding:24px 18px 60px}
+  .topbar{padding:12px 18px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+<nav class="sidenav">
+  <div class="brandmark"><span class="dot"></span><b>Medix</b></div>
+  <div class="navgrp">Foundation</div>
+  <a href="#what">What Medix is</a>
+  <a href="#decisions">Four decisions</a>
+  <a href="#actors">Actors</a>
+  <div class="navgrp">Design system</div>
+  <a href="#surfaces">Surfaces</a>
+  <a href="#semantic">Semantic colour</a>
+  <a href="#type">Type &amp; metrics</a>
+  <a href="#shell">Application shell</a>
+  <div class="navgrp">Screens</div>
+  <a href="#overview">Pharmacist overview</a>
+  <a href="#browse">Marketplace</a>
+  <a href="#cards">Product cards</a>
+  <a href="#detail">Product detail</a>
+  <a href="#pos">Point of sale</a>
+  <a href="#import">Import console</a>
+  <a href="#exec">Executive</a>
+  <div class="navgrp">Domain</div>
+  <a href="#ledger">Stock ledger</a>
+  <a href="#modules">Modules</a>
+  <a href="#docs">Documents</a>
+  <div class="navgrp">Delivery</div>
+  <a href="#risk">Risk register</a>
+  <a href="#open">Open decisions</a>
+</nav>
+
+<div class="main">
+<div class="topbar">
+  <span class="t">Medix — system &amp; design specification</span>
+  <button class="themebtn" id="tt">Toggle theme</button>
+</div>
+
+<div class="body">
+
+<section id="what">
+  <div class="eyebrow">Foundation</div>
+  <h1>Medix</h1>
+  <p class="lede">A pharmaceutical commerce, operations, compliance and intelligence platform for Rwanda — built as one transaction ledger with four windows cut into it.</p>
+  <div class="rule"></div>
+
+  <p>A Rwandan pharmacy runs on disconnected paper. Purchases in one notebook, sales in another, expiry in a third, insurance in a fourth. At night the pharmacist reconciles by hand and gets it roughly right. The owner cannot answer <em>did we make money</em> — they know revenue, guess at margin, and value stock from a count taken weeks ago.</p>
+  <p>Two authorities want data from that same counter. <strong>Rwanda FDA</strong> asks whether the product is registered, stored and dispensed lawfully. <strong>RRA</strong> asks whether every sale produced a fiscal invoice. The pharmacy does the same work five times and still can't answer the two questions that matter.</p>
+
+  <div class="note" style="margin:20px 0"><strong>The thesis.</strong> Medix is not five digital notebooks. It is one transaction ledger with five views. Every screen is a lens on a segment of a single chain — and if any link is bypassable, the chain rots and the notebooks come back.</div>
+
+  <h3>The spine</h3>
+  <div class="flow">
+    <b>Product</b><i>→</i><b>Listing</b><i>→</i><b>Batch</b><i>→</i><b>Inventory</b><i>→</i><b>Purchase</b><i>→</i><b>Order</b><i>→</i><b>Shipment</b><i>→</i><b>Goods receipt</b><i>→</i><b>Stock</b><i>→</i><b>Prescription</b><i>→</i><b>Sale</b><i>→</i><b>Claim</b><i>→</i><b>EBM invoice</b><i>→</i><b>Financial record</b><i>→</i><b>Report</b>
+  </div>
+  <p style="margin-top:16px">The pharmacist looks at the middle. The owner looks at the end. The wholesaler looks at the beginning. The regulator looks across all of it. Same data, different windows.</p>
+</section>
+
+<section id="decisions">
+  <div class="eyebrow">Foundation</div>
+  <h2>The four decisions everything depends on</h2>
+  <p class="sub">Get these wrong and the product is rebuilt, not patched. Each has to be made before the first screen is written.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">01 — Stock is a ledger, never a counter</h3>
+      <p style="font-size:13px"><code>stock = stock - 1</code> kills the system. Every movement is an immutable row referencing why. Recall answers in seconds, margin knows the batch cost, disputes settle by replay, and audit comes free.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">02 — Allocation is FEFO</h3>
+      <p style="font-size:13px">First <em>Expired</em>, First Out — not FIFO. The system auto-selects the nearest-expiry batch with stock. Override is allowed, requires a reason, and is logged. FIFO silently generates write-offs.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">03 — Unit-of-measure hierarchy</h3>
+      <p style="font-size:13px">This market sells six tablets, not a box of a hundred. Carton → pack → blister → tablet, all reconciling against one batch. Purchasing in packs, dispensing in units. Unfixable later.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">04 — Cloud plus local agent</h3>
+      <p style="font-size:13px">RRA's VSDC runs on the taxpayer's own local server, so a pure cloud SaaS cannot issue fiscal invoices. The same agent is what keeps POS working offline. Two requirements, one component.</p>
+    </div>
+  </div>
+</section>
+
+<section id="actors">
+  <div class="eyebrow">Foundation</div>
+  <h2>Four products over one ledger</h2>
+  <p class="sub">Not role-based hiding of a single dashboard. Genuinely different applications sharing a database.</p>
+  <div class="tw">
+    <table>
+      <tr><th>Actor</th><th>Core question</th><th>Sees</th><th>Never sees</th></tr>
+      <tr><td><strong>Pharmacist</strong></td><td>What do I do now?</td><td>Sell, stock, prescriptions, receiving</td><td>Gross margin by branch</td></tr>
+      <tr><td><strong>Owner</strong></td><td>Is my business healthy?</td><td>Revenue, margin, stock value, receivables</td><td>Batch picking screens</td></tr>
+      <tr><td><strong>Wholesaler</strong></td><td>What's asked for, can I fulfil it?</td><td>Catalog, orders, RFQs, consolidation, shipments</td><td>Competitors' pricing</td></tr>
+      <tr><td><strong>Regulator</strong></td><td>What's happening in the market?</td><td>Registrations, licenses, recalls, audit</td><td>—</td></tr>
+    </table>
+  </div>
+  <p style="margin-top:16px"><strong>Progressive disclosure is the mechanism.</strong> A one-branch owner sees Sell, Order, Stock, Reports — and never learns RFQ, GRN or ASN. Those surface when the business grows into them. Complexity lives underneath the interface, not in front of the user.</p>
+</section>
+
+<section id="surfaces">
+  <div class="eyebrow">Design system</div>
+  <h2>Surfaces</h2>
+  <p class="sub">Five levels, never eight. Depth comes from barely perceptible differences between neutrals, not from putting every section in a floating card. The user never thinks "there are four backgrounds" — they feel that the interface has structure.</p>
+
+  <div class="grid3">
+    <div class="swatch"><div class="chip" style="background:var(--app)"></div><div class="meta"><div class="nm">Workspace</div><div class="hx" id="h-app">#F4F6F8</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--nav)"></div><div class="meta"><div class="nm">Navigation</div><div class="hx" id="h-nav">#F0F3F6</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--top)"></div><div class="meta"><div class="nm">Top bar</div><div class="hx" id="h-top">#F7F8FA</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--content)"></div><div class="meta"><div class="nm">Secondary</div><div class="hx" id="h-con">#F8FAFC</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--surface)"></div><div class="meta"><div class="nm">Surface</div><div class="hx" id="h-sur">#FFFFFF</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--selected)"></div><div class="meta"><div class="nm">Selected</div><div class="hx" id="h-sel">#E8F1FF</div></div></div>
+  </div>
+
+  <h3>Two borders, deliberately</h3>
+  <p>The source specification gave two conflicting border values. Both are kept, because they do different work — collapsing them is why tables turn into grids of boxes.</p>
+  <div class="tw" style="margin-top:10px">
+    <table>
+      <tr><th>Token</th><th>Light</th><th>Dark</th><th>Used for</th></tr>
+      <tr><td><code>--border</code></td><td><span class="m">#DCE2E8</span></td><td><span class="m">#2B333A</span></td><td>Structural — panels, inputs, table outline, shell edges</td></tr>
+      <tr><td><code>--hair</code></td><td><span class="m">#E4E8EC</span></td><td><span class="m">#242B31</span></td><td>Hairline — table rows, list separators. Near-invisible at 1440p</td></tr>
+    </table>
+  </div>
+
+  <h3>Elevation</h3>
+  <p>No shadow on normal content. <code>0 1px 2px rgba(15,23,42,.04)</code> for raised. Stronger for dropdown, stronger again for modal. No Mica or Acrylic — this is a browser application, so solid surfaces plus subtle elevation. Transparency used sparingly or not at all.</p>
+
+  <div class="note" style="margin-top:18px"><strong>Discipline: 90 / 8 / 2.</strong> Ninety percent neutral, eight percent structural and accent, two percent strong semantic colour. Not a mathematical rule — a visual one.</div>
+</section>
+
+<section id="semantic">
+  <div class="eyebrow">Design system</div>
+  <h2>Semantic colour</h2>
+  <p class="sub">Status only, never decoration. The brand blue is an accent for actions and active state — it is never the environment, and it never doubles as a status colour.</p>
+
+  <div class="grid3">
+    <div class="swatch"><div class="chip" style="background:var(--brand)"></div><div class="meta"><div class="nm">Brand</div><div class="hx" id="h-br">#0078D4</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--ok)"></div><div class="meta"><div class="nm">Success</div><div class="hx" id="h-ok">#059669</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--warn)"></div><div class="meta"><div class="nm">Warning</div><div class="hx" id="h-wa">#D97706</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bad)"></div><div class="meta"><div class="nm">Danger</div><div class="hx" id="h-ba">#DC2626</div></div></div>
+  </div>
+
+  <h3>Status renders as a dot or a quiet badge — never a coloured row</h3>
+  <div class="card" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:20px;align-items:center">
+    <span style="font-size:12.5px;color:var(--ok)"><span class="sd">●</span> Available</span>
+    <span style="font-size:12.5px;color:var(--warn)"><span class="sd">●</span> Low stock</span>
+    <span style="font-size:12.5px;color:var(--bad)"><span class="sd">●</span> Expiring</span>
+    <span style="font-size:12.5px;color:var(--text2)"><span class="sd">●</span> Draft</span>
+    <span class="pill p-ok">Received</span>
+    <span class="pill p-warn">Awaiting approval</span>
+    <span class="pill p-bad">Recalled</span>
+    <span class="pill p-n">Quarantined</span>
+  </div>
+  <p style="margin-top:14px">Stock <strong>status</strong> is not the same as stock <strong>quantity</strong>. The eight states are <code>AVAILABLE</code> <code>RESERVED</code> <code>QUARANTINED</code> <code>DAMAGED</code> <code>EXPIRED</code> <code>RECALLED</code> <code>IN_TRANSIT</code> <code>RETURNED</code>.</p>
+</section>
+
+<section id="type">
+  <div class="eyebrow">Design system</div>
+  <h2>Type and metrics</h2>
+  <p class="sub">Inter in production. The scale is set at the dense end — 20 and 13 rather than 24 and 14 — because at the larger scale the same table loses roughly four visible rows at laptop height. In a system where the table is the interface, rows on screen beats generous headings.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">Type scale</h3>
+      <dl class="kv">
+        <dt>Page title</dt><dd>20 / 600</dd>
+        <dt>Section title</dt><dd>14 / 600</dd>
+        <dt>Body</dt><dd>13 / 400</dd>
+        <dt>Table cell</dt><dd>13 / 400</dd>
+        <dt>Table header</dt><dd>12 / 600</dd>
+        <dt>Label</dt><dd>12 / 500</dd>
+        <dt>Helper</dt><dd>11 / 400</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Component metrics</h3>
+      <dl class="kv">
+        <dt>Sidebar</dt><dd>248 / 68 collapsed</dd>
+        <dt>Content max-width</dt><dd>1440</dd>
+        <dt>Page padding</dt><dd>24</dd>
+        <dt>Card padding</dt><dd>16–20</dd>
+        <dt>Input height</dt><dd>36–40</dd>
+        <dt>Button height</dt><dd>36</dd>
+        <dt>Table row</dt><dd>40 / 48 by density</dd>
+      </dl>
+    </div>
+  </div>
+
+  <h3>Spacing, radius, icons</h3>
+  <p>Spacing scale <code>4 · 8 · 12 · 16 · 20 · 24 · 32 · 40 · 48 · 64</code> — never 13, 17, 19, 27. Radius <code>6</code> badges, <code>8</code> inputs and buttons, <code>10</code> cards, <code>12</code> major panels; nothing at 20 or above. Icons are Lucide only, 16–18px at 1.75–2 stroke, one family throughout, and never inside every button — text-only buttons are usually cleaner.</p>
+</section>
+
+<section id="shell">
+  <div class="eyebrow">Design system</div>
+  <h2>Application shell</h2>
+  <p class="sub">Fixed for every module. Only the content area changes, and it always follows the same rhythm: page header, primary workspace, secondary information.</p>
+  <pre>┌──────────────────────────────────────────────────────────────┐
+│ GLOBAL HEADER      search ⌘K              notifications  user │
+├──────────────┬───────────────────────────────────────────────┤
+│              │  PAGE HEADER    title · description · actions │
+│   SIDEBAR    ├───────────────────────────────────────────────┤
+│   248px      │                                               │
+│   grouped    │  PRIMARY WORKSPACE                            │
+│   sections   │  table, console, cart or canvas               │
+│              ├───────────────────────────────────────────────┤
+│              │  SECONDARY INFORMATION                        │
+├──────────────┴───────────────────────────────────────────────┤
+│ ● All systems operational          last sync 10:42     v1.0  │
+└──────────────────────────────────────────────────────────────┘</pre>
+  <h3>The interaction model</h3>
+  <div class="flow" style="margin-bottom:12px"><b>Search</b><i>→</i><b>Table</b><i>→</i><b>Detail drawer</b><i>→</i><b>Full transaction</b></div>
+  <p>Drawers for preview, quick edit and activity — they keep the user in context. Full pages only for genuine workflows: purchase order creation, import request, receiving, POS, prescription processing, insurance claim. This is what makes an ERP fast rather than click-heavy.</p>
+</section>
+
+<section id="overview">
+  <div class="eyebrow">Screens</div>
+  <h2>Pharmacist overview</h2>
+  <p class="sub">An operational workspace, not a dashboard. The KPI strip is borderless — four numbers on the workspace, separated by one hairline. The table gets the only real surface, because it is the thing being worked on.</p>
+
+  <div class="mock">
+    <div class="mockbar">Overview — Kigali Care Pharmacy</div>
+    <div style="padding:18px 20px">
+      <div style="font-size:20px;font-weight:600;letter-spacing:-.02em">Good morning, Marie</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:1px">Kigali Care Pharmacy · Tuesday, 11 August</div>
+      <div style="display:flex;gap:30px;flex-wrap:wrap;margin:18px 0 16px;padding-bottom:16px;border-bottom:1px solid var(--hair)">
+        <div><div style="font-size:11px;color:var(--text2)">Sales today</div><div style="font-size:19px;font-weight:600;font-variant-numeric:tabular-nums">1.84M</div><div style="font-size:11px;color:var(--ok)">↑ 12.4%</div></div>
+        <div><div style="font-size:11px;color:var(--text2)">Orders</div><div style="font-size:19px;font-weight:600;font-variant-numeric:tabular-nums">24</div><div style="font-size:11px;color:var(--ok)">↑ 8.2%</div></div>
+        <div><div style="font-size:11px;color:var(--text2)">Low stock</div><div style="font-size:19px;font-weight:600;font-variant-numeric:tabular-nums">18</div><div style="font-size:11px;color:var(--warn)">Needs review</div></div>
+        <div><div style="font-size:11px;color:var(--text2)">Expiry alerts</div><div style="font-size:19px;font-weight:600;font-variant-numeric:tabular-nums">32</div><div style="font-size:11px;color:var(--bad)">12 critical</div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600">Expiring batches</span>
+        <span style="font-size:11.5px;color:var(--brand)">View all</span>
+      </div>
+      <div class="tw">
+        <table>
+          <tr><th>Product</th><th>Batch</th><th>Expiry</th><th style="text-align:right">Qty</th><th>Status</th></tr>
+          <tr><td>Cetirizine 10mg</td><td><span class="m">CTZ-4421</span></td><td>Sep 2026</td><td class="num">28</td><td style="color:var(--bad)"><span class="sd">●</span> Critical</td></tr>
+          <tr><td>Amoxicillin 500mg</td><td><span class="m">AMX-0021</span></td><td>Apr 2027</td><td class="num">240</td><td style="color:var(--warn)"><span class="sd">●</span> Expiring</td></tr>
+          <tr><td>Paracetamol 500mg</td><td><span class="m">PCM-1022</span></td><td>Jun 2028</td><td class="num">820</td><td style="color:var(--ok)"><span class="sd">●</span> Healthy</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="browse">
+  <div class="eyebrow">Screens</div>
+  <h2>Marketplace — list is the professional default</h2>
+  <p class="sub">A pharmacist doing serious procurement scans faster in a list than a grid. List is the default; grid is available where visual identification actually matters.</p>
+
+  <div class="mock">
+    <div class="mockbar">Marketplace — 1,284 products</div>
+    <div style="padding:16px 18px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+        <div style="font-size:11.5px;color:var(--text2)">Category · Supplier · Availability · Price</div>
+        <div class="seg"><span class="on">List</span><span>Grid</span></div>
+      </div>
+      <div class="tw">
+        <table>
+          <tr><th>Product</th><th>Supplier</th><th style="text-align:right">Stock</th><th style="text-align:right">Price</th><th>Status</th></tr>
+          <tr><td>Amoxicillin 500mg</td><td>MedSupply</td><td class="num">240</td><td class="num">28,000</td><td style="color:var(--ok)"><span class="sd">●</span> Available</td></tr>
+          <tr><td>Paracetamol 500mg</td><td>ABC Wholesale</td><td class="num">820</td><td class="num">12,000</td><td style="color:var(--ok)"><span class="sd">●</span> Available</td></tr>
+          <tr><td>Cetirizine 10mg</td><td>ABC Wholesale</td><td class="num">120</td><td class="num">9,500</td><td style="color:var(--warn)"><span class="sd">●</span> Low</td></tr>
+          <tr><td>Insulin XYZ 100IU</td><td>—</td><td class="num">0</td><td class="num">—</td><td style="color:var(--text2)"><span class="sd">●</span> Import only</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3>Vendor comparison</h3>
+  <p>The system makes the tradeoff visible. It does not choose. Cheapest here expires a year earlier and takes three days — that is a real procurement decision belonging to a human.</p>
+  <div class="tw" style="margin-top:10px">
+    <table>
+      <tr><th>&nbsp;</th><th style="text-align:right">Price</th><th style="text-align:right">Stock</th><th>Expiry</th><th style="text-align:right">MOQ</th><th>Delivery</th><th>Verified</th></tr>
+      <tr><td>ABC Wholesale</td><td class="num">28,000</td><td class="num">500</td><td>2029</td><td class="num">10</td><td>1 day</td><td style="color:var(--ok)">✓</td></tr>
+      <tr><td>MedSupply</td><td class="num">29,000</td><td class="num">200</td><td>2029</td><td class="num">20</td><td>2 days</td><td style="color:var(--ok)">✓</td></tr>
+      <tr><td>XYZ Pharma</td><td class="num">27,500</td><td class="num">100</td><td>2028</td><td class="num">10</td><td>3 days</td><td style="color:var(--ok)">✓</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="cards">
+  <div class="eyebrow">Screens</div>
+  <h2>Product cards</h2>
+  <p class="sub">Cards stay small. The failure mode is a huge image, a long description, a giant price and a full-width button — a consumer shopping card that fits four products on screen instead of twelve.</p>
+
+  <div class="mock">
+    <div class="mockbar">Grid view — visual identification</div>
+    <div style="padding:16px 18px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px">
+        <div class="pcard">
+          <div class="pimg">PRODUCT IMAGE</div>
+          <div class="pbody">
+            <div class="pnm">Amoxicillin 500mg</div>
+            <div class="pmeta">Capsule · 100 pack</div>
+            <div class="prow"><span class="pprice">28,000</span><span class="pstock">240 left</span></div>
+            <button class="padd">Add</button>
+          </div>
+        </div>
+        <div class="pcard">
+          <div class="pimg">PRODUCT IMAGE</div>
+          <div class="pbody">
+            <div class="pnm">Paracetamol 500mg</div>
+            <div class="pmeta">Tablet · 100 pack</div>
+            <div class="prow"><span class="pprice">12,000</span><span class="pstock">820 left</span></div>
+            <button class="padd">Add</button>
+          </div>
+        </div>
+        <div class="pcard">
+          <div class="pimg">PRODUCT IMAGE</div>
+          <div class="pbody">
+            <div class="pnm">Cetirizine 10mg</div>
+            <div class="pmeta">Tablet · 30 pack</div>
+            <div class="prow"><span class="pprice">9,500</span><span class="pstock" style="color:var(--warn)">120 left</span></div>
+            <button class="padd">Add</button>
+          </div>
+        </div>
+        <div class="pcard">
+          <div class="pimg">PRODUCT IMAGE</div>
+          <div class="pbody">
+            <div class="pnm">Surgical gloves</div>
+            <div class="pmeta">Latex · box of 100</div>
+            <div class="prow"><span class="pprice">14,200</span><span class="pstock">460 left</span></div>
+            <button class="padd">Add</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Three presentation modes, chosen by task</h3>
+  <div class="tw" style="margin-top:10px">
+    <table>
+      <tr><th>Mode</th><th>Use when</th><th>Best for</th></tr>
+      <tr><td><strong>Compact list</strong></td><td>Default. Experienced users doing procurement</td><td>Speed, comparison, density</td></tr>
+      <tr><td><strong>Card grid</strong></td><td>Visual identification matters</td><td>Cosmetics, OTC, devices, consumables, discovery</td></tr>
+      <tr><td><strong>Split detail</strong></td><td>One product, full context</td><td>Regulatory data, batches, suppliers, documents</td></tr>
+    </table>
+  </div>
+
+  <h3>Product type changes the card</h3>
+  <p>A medicine, a cosmetic, a device and a consumable should not be forced into an identical card. A medicine needs generic name, strength, dosage form and prescription status; a device needs model, specification and sterility; a cosmetic needs brand, size and use. This is why the product model needs <strong>dynamic attributes per type</strong>, not one flat table.</p>
+</section>
+
+<section id="detail">
+  <div class="eyebrow">Screens</div>
+  <h2>Product detail</h2>
+  <p class="sub">Split layout with tabs — not thirty fields distributed across twelve cards.</p>
+
+  <div class="mock">
+    <div class="mockbar">Products / Amoxicillin 500mg</div>
+    <div style="padding:18px 20px">
+      <div style="display:flex;gap:20px;flex-wrap:wrap">
+        <div style="width:132px;height:132px;background:var(--content);border:1px solid var(--hair);border-radius:var(--r2);display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:10.5px;letter-spacing:.05em;flex-shrink:0">PRODUCT IMAGE</div>
+        <div style="flex:1;min-width:210px">
+          <div style="font-size:20px;font-weight:600;letter-spacing:-.02em">Amoxicillin 500mg</div>
+          <div style="font-size:13px;color:var(--text2)">Capsules · 100 pack · MedSupply</div>
+          <div style="display:flex;gap:8px;margin:11px 0">
+            <span class="pill p-ok">Registered</span>
+            <span class="pill p-n">Prescription only</span>
+          </div>
+          <div style="font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:12px">RWF 28,000</div>
+          <div style="font-size:12.5px;color:var(--text2)">240 packs available · earliest expiry Apr 2027</div>
+          <button class="padd" style="width:auto;padding:7px 20px;margin-top:12px">Add to order</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px;margin-top:20px;padding-top:11px;border-top:1px solid var(--hair);font-size:12.5px;color:var(--text2)">
+        <span style="color:var(--brand);font-weight:600;border-bottom:2px solid var(--brand);padding-bottom:7px">Overview</span>
+        <span>Uses</span><span>Suppliers</span><span>Batches</span><span>Documents</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="warnbox" style="margin-top:18px"><strong>Hard guardrail.</strong> The Uses tab carries approved reference information and links the official leaflet. It never maps symptom to drug. Diagnosis and prescribing are regulated professional acts — the system's job is to enforce that boundary, not blur it.</div>
+</section>
+
+<section id="pos">
+  <div class="eyebrow">Screens</div>
+  <h2>Point of sale</h2>
+  <p class="sub">Faster and more tactile than the rest of the system, with larger touch targets — while keeping the same visual language. A pharmacist at eleven at night should not be fighting the software.</p>
+
+  <div class="mock">
+    <div class="mockbar">Point of sale — till 02</div>
+    <div style="padding:16px 18px">
+      <div style="background:var(--hover);border-radius:var(--r1);padding:8px 11px;font-size:12.5px;color:var(--text2);margin-bottom:12px">Search product or scan barcode…</div>
+      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--hair);font-size:13px"><span>Amoxicillin 500mg <span style="color:var(--text2)">× 2</span></span><span style="font-variant-numeric:tabular-nums">56,000</span></div>
+      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--hair);font-size:13px"><span>Paracetamol 500mg <span style="color:var(--text2)">× 1</span></span><span style="font-variant-numeric:tabular-nums">12,000</span></div>
+      <div style="background:var(--bad-bg);border-left:2px solid var(--bad);padding:9px 12px;margin:12px 0;font-size:12.5px"><strong style="color:var(--bad)">Prescription required</strong><span style="color:var(--text2)"> — Amoxicillin is prescription-only. Attach a prescription to continue.</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:600;padding-top:9px;border-top:1px solid var(--border)"><span>Total</span><span style="font-variant-numeric:tabular-nums">RWF 68,000</span></div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <span class="pill p-n" style="padding:7px 16px">Cash</span>
+        <span class="pill p-n" style="padding:7px 16px">Mobile money</span>
+        <span class="pill p-n" style="padding:7px 16px">Insurance</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Three things the POS must get right</h3>
+  <ul>
+    <li><strong>Prescription gating blocks, it does not warn.</strong> A prescription-only product stops the sale. OCR may extract fields; OCR never authorizes. A registered pharmacist confirms, and their council number attaches to the dispensing event.</li>
+    <li><strong>Payment is asynchronous.</strong> Mobile money uses request-to-pay with a callback — the customer confirms on their phone. The sale needs a pending state that may resolve in seconds, time out, or require reconciliation. The three buttons above are not three equivalent instant actions.</li>
+    <li><strong>Tax is per line.</strong> Medicines are VAT-exempt; cosmetics, devices and consumables generally are not. Every invoice is mixed-treatment, and exempt is not zero-rated — input VAT is not reclaimable, which changes the true cost basis and therefore margin.</li>
+  </ul>
+</section>
+
+<section id="import">
+  <div class="eyebrow">Screens</div>
+  <h2>Import console</h2>
+  <p class="sub">Where Medix stops being pharmacy software and becomes a platform. Information does the visual work — very little decoration.</p>
+
+  <div class="mock">
+    <div class="mockbar">Import request IR-00082</div>
+    <div style="padding:16px 18px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+        <div><div style="font-size:20px;font-weight:600;letter-spacing:-.02em">Insulin XYZ 100IU</div><div style="font-size:12.5px;color:var(--text2)">Kigali Care Pharmacy · requested 4 August</div></div>
+        <span class="pill p-warn">Awaiting approval</span>
+      </div>
+      <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);font-weight:600;margin:18px 0 7px">Consolidated demand</div>
+      <div class="tw">
+        <table>
+          <tr><th>Pharmacy</th><th style="text-align:right">Quantity</th><th>Committed</th></tr>
+          <tr><td>Kigali Care Pharmacy</td><td class="num">100</td><td style="color:var(--ok)">✓</td></tr>
+          <tr><td>Remera Pharmacy</td><td class="num">50</td><td style="color:var(--ok)">✓</td></tr>
+          <tr><td>Huye Community Pharmacy</td><td class="num">200</td><td style="color:var(--ok)">✓</td></tr>
+          <tr><td>Musanze Pharmacy</td><td class="num">75</td><td style="color:var(--warn)">Pending</td></tr>
+          <tr style="background:var(--content)"><td><strong>Total demand</strong></td><td class="num"><strong>425</strong></td><td style="color:var(--text2)">MOQ 400 met</td></tr>
+        </table>
+      </div>
+      <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);font-weight:600;margin:18px 0 7px">Quotations</div>
+      <div class="tw">
+        <table>
+          <tr><th>Importer</th><th style="text-align:right">Product</th><th style="text-align:right">Shipping</th><th style="text-align:right">Other</th><th>Lead time</th></tr>
+          <tr><td>ABC Importers</td><td class="num">2,400,000</td><td class="num">320,000</td><td class="num">180,000</td><td>28 days</td></tr>
+          <tr><td>MedSupply</td><td class="num">2,310,000</td><td class="num">350,000</td><td class="num">195,000</td><td>35 days</td></tr>
+        </table>
+      </div>
+      <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);font-weight:600;margin:18px 0 9px">Status</div>
+      <div class="tl">
+        <span class="n"><span class="d"></span> Requested</span><span class="bar"></span>
+        <span class="n"><span class="d"></span> Quoted</span><span class="bar"></span>
+        <span class="n"><span class="d off"></span> Approved</span><span class="bar"></span>
+        <span class="n"><span class="d off"></span> Shipped</span><span class="bar"></span>
+        <span class="n"><span class="d off"></span> Arrived</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:18px"><strong>Why this is the defensible piece.</strong> A pharmacy needing 75 packs cannot import — it fails MOQ and per-unit clearance makes it uneconomic. Twenty pharmacies clear it easily. No existing actor can see that aggregate demand exists, because it is scattered across twenty separate phone calls. Medix makes previously impossible imports possible — that is the adoption argument, not "nicer software".</div>
+
+  <h3>Four problems consolidation creates</h3>
+  <ul>
+    <li><strong>Partial-arrival allocation.</strong> 425 ordered, 400 arrive — who gets short? Needs a stated policy per order, and one consignment must produce separate goods receipts per pharmacy with correct batch traceability.</li>
+    <li><strong>Landed-cost apportionment.</strong> Shipping and clearance are charged to the shipment, not the product. They must be apportioned across participants to produce the batch cost basis — which drives every margin number in the executive portal. Highest-leverage detail in the module.</li>
+    <li><strong>FX exposure.</strong> Sourced in USD, paid in RWF, 21–45 days apart. Record quote currency, rate, rate date, and whether the quote is fixed or indicative.</li>
+    <li><strong>Commitment.</strong> One withdrawal can drop the group below MOQ and break it for everyone. Needs a binding commitment point, probably with a deposit.</li>
+  </ul>
+</section>
+
+<section id="exec">
+  <div class="eyebrow">Screens</div>
+  <h2>Executive</h2>
+  <p class="sub">The owner is not asked to interpret twenty charts. Attention comes first, performance second.</p>
+
+  <div class="mock">
+    <div class="mockbar">Business overview — 4 branches</div>
+    <div style="padding:18px 20px">
+      <div style="display:flex;gap:30px;flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid var(--hair)">
+        <div><div style="font-size:11px;color:var(--text2)">Revenue</div><div style="font-size:19px;font-weight:600;font-variant-numeric:tabular-nums">18.4M</div><div style="font-size:11px;color:var(--ok)">↑ 12.4%</div></div>
+        <div><div style="font-size:11px;color:var(--text2)">Gross profit</div><div style="font-size:19px;font-weight:600;font-variant-numeric:tabular-nums">5.7M</div><div style="font-size:11px;color:var(--ok)">↑ 8.1%</div></div>
+        <div><div style="font-size:11px;color:var(--text2)">Stock value</div><div style="font-size:19px;font-weight:600;font-variant-numeric:tabular-nums">31.2M</div><div style="font-size:11px;color:var(--bad)">↓ 2.4%</div></div>
+        <div><div style="font-size:11px;color:var(--text2)">Receivables</div><div style="font-size:19px;font-weight:600;font-variant-numeric:tabular-nums">4.8M</div><div style="font-size:11px;color:var(--warn)">2.1M overdue</div></div>
+      </div>
+      <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);font-weight:600;margin:16px 0 8px">Needs attention</div>
+      <div style="font-size:12.5px;display:grid;gap:6px">
+        <div><span style="color:var(--bad)">●</span> 18 products expiring within 30 days</div>
+        <div><span style="color:var(--warn)">●</span> 6 supplier invoices overdue</div>
+        <div><span style="color:var(--warn)">●</span> 3 insurance claims rejected</div>
+        <div><span style="color:var(--bad)">●</span> Stock shortage on 7 fast-moving products</div>
+      </div>
+      <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);font-weight:600;margin:18px 0 7px">Branch performance</div>
+      <div class="tw">
+        <table>
+          <tr><th>Branch</th><th style="text-align:right">Revenue</th><th style="text-align:right">Margin</th><th style="text-align:right">Stock value</th><th style="text-align:right">Stock-outs</th></tr>
+          <tr><td>Kigali</td><td class="num">42M</td><td class="num">24%</td><td class="num">18M</td><td class="num">3</td></tr>
+          <tr><td>Remera</td><td class="num">31M</td><td class="num">21%</td><td class="num">11M</td><td class="num">8</td></tr>
+          <tr><td>Huye</td><td class="num">22M</td><td class="num">27%</td><td class="num">9M</td><td class="num">2</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="warnbox" style="margin-top:18px"><strong>Never lie about profit.</strong> Revenue minus cost of goods gives gross profit. If there is not enough accounting data to compute net profit reliably, the label reads <em>estimated operating result</em> — never <em>net profit</em>. A system that overstates profit gets abandoned the first time an accountant checks it.</div>
+</section>
+
+<section id="ledger">
+  <div class="eyebrow">Domain</div>
+  <h2>The stock ledger</h2>
+  <p class="sub">The single technical decision everything else rests on. Stock is never a number you edit.</p>
+  <pre>DATE     EVENT        IN    OUT   BALANCE   REFERENCE
+11 Aug   Opening                  500       MIG-0001
+11 Aug   Purchase     200         700       GRN-00412 · batch AMX-2601
+11 Aug   Sale               20    680       SAL-00982 · till 02 · Olivier
+11 Aug   Transfer           50    630       TRF-0088 → Remera
+11 Aug   Adjustment          2    628       Damage · approved Marie</pre>
+  <ul style="margin-top:16px">
+    <li><strong>Recall</strong> must answer "who received units from AMX-2601" in seconds. A counter cannot.</li>
+    <li><strong>Margin</strong> needs batch-level cost. You bought at 28,000 and at 31,000 — which did you just sell?</li>
+    <li><strong>Disputes</strong> settle by replay: cash short at day end, claim rejected, count mismatch.</li>
+    <li><strong>Audit comes free.</strong> You do not build auditing as a separate feature — the ledger is the audit.</li>
+  </ul>
+</section>
+
+<section id="modules">
+  <div class="eyebrow">Domain</div>
+  <h2>Modules</h2>
+  <div class="tw">
+    <table>
+      <tr><th>Module</th><th>Contains</th></tr>
+      <tr><td><strong>Marketplace</strong></td><td>Available now, incoming, pre-order, request product, vendor comparison</td></tr>
+      <tr><td><strong>Import &amp; special orders</strong></td><td>Import requests, RFQ broadcast, quotations, consolidation, shipments, regulatory documents</td></tr>
+      <tr><td><strong>Procurement</strong></td><td>Requisition, approval, purchase orders, suppliers, price intelligence, payment terms</td></tr>
+      <tr><td><strong>Receiving</strong></td><td>Goods receipt, discrepancy reports, batch entry, GS1 scan capture</td></tr>
+      <tr><td><strong>Inventory</strong></td><td>Ledger, batches, FEFO, locations, transfers, expiry, cold chain, stock take, disposal</td></tr>
+      <tr><td><strong>Point of sale</strong></td><td>Sale, prescription gating, controlled register, payments, till and shift, day end</td></tr>
+      <tr><td><strong>Insurance</strong></td><td>Eligibility, coverage rules, co-pay, claims, rejections, receivables</td></tr>
+      <tr><td><strong>Fiscal</strong></td><td>Invoice engine, local agent, VSDC bridge, fiscal response, reconciliation</td></tr>
+      <tr><td><strong>Compliance</strong></td><td>Product registration, premises licence, pharmacist registration, recalls, inspections</td></tr>
+      <tr><td><strong>Finance</strong></td><td>Revenue, COGS, expenses, receivables, payables, aging</td></tr>
+      <tr><td><strong>Intelligence</strong></td><td>Margin by category, vendor performance, branch comparison, attention feed</td></tr>
+      <tr><td><strong>Assistant</strong></td><td>Search and action layer — assists, never silently performs sensitive actions</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="docs">
+  <div class="eyebrow">Domain</div>
+  <h2>Documents</h2>
+  <p class="sub">Roughly thirty-five document types across seven categories. Every one renders as a real professional document — and the web preview matches the PDF.</p>
+  <div class="grid2">
+    <div class="card"><h3 style="margin-top:0">Procurement</h3><p style="font-size:12.5px;margin:0">RFQ · Quotation · Purchase order · Order confirmation</p></div>
+    <div class="card"><h3 style="margin-top:0">Import</h3><p style="font-size:12.5px;margin:0">Import request · Manifest · Commercial invoice · Packing list · Regulatory docs · Inspection record</p></div>
+    <div class="card"><h3 style="margin-top:0">Receiving</h3><p style="font-size:12.5px;margin:0">Delivery note · Goods received note · Discrepancy report · Stock receipt</p></div>
+    <div class="card"><h3 style="margin-top:0">Sales</h3><p style="font-size:12.5px;margin:0">Sales invoice · EBM invoice · Receipt · Credit note · Return note</p></div>
+    <div class="card"><h3 style="margin-top:0">Insurance</h3><p style="font-size:12.5px;margin:0">Prescription · Claim · Submission · Response · Rejection · Supporting documents</p></div>
+    <div class="card"><h3 style="margin-top:0">Stock &amp; compliance</h3><p style="font-size:12.5px;margin:0">Transfer · Adjustment · Count sheet · Expiry report · Recall notice · Disposal record · Licence · Inspection report · Audit record</p></div>
+  </div>
+  <p style="margin-top:16px">Each carries a clean header, Medix identity, organisation details, document number, date, status, parties, line items, totals, terms, approvals, a QR reference where appropriate, footer and page numbers. No HTML-looking PDFs.</p>
+</section>
+
+<section id="risk">
+  <div class="eyebrow">Delivery</div>
+  <h2>Risk register</h2>
+  <p class="sub">Ranked by cost of discovering it late. The top two are verification tasks, not build tasks — they should be resolved before the first line of code.</p>
+  <div class="tw">
+    <table>
+      <tr><th>Risk</th><th>Why it matters</th><th>Action</th></tr>
+      <tr><td><strong>VSDC deployment model</strong></td><td>Decides cloud-only versus cloud plus local agent — the entire architecture</td><td><span class="pill p-bad">Verify with RRA</span></td></tr>
+      <tr><td><strong>CBHI capitation</strong></td><td>May invalidate the claim-and-reimburse shape of the insurance module for the dominant payer</td><td><span class="pill p-bad">Verify with RSSB</span></td></tr>
+      <tr><td><strong>Unit-of-measure hierarchy</strong></td><td>Unfixable later without rewriting ledger, POS and pricing</td><td><span class="pill p-warn">Build day one</span></td></tr>
+      <tr><td><strong>Batch-level costing</strong></td><td>Every margin number depends on it</td><td><span class="pill p-warn">Build day one</span></td></tr>
+      <tr><td><strong>Offline POS</strong></td><td>Connectivity is not guaranteed; a POS that stops selling is worthless</td><td><span class="pill p-warn">Local agent</span></td></tr>
+      <tr><td><strong>Data residency</strong></td><td>Law 058/2021 treats health data as sensitive and constrains transfer</td><td><span class="pill p-warn">Check before region</span></td></tr>
+      <tr><td><strong>Landed-cost apportionment</strong></td><td>Wrong here means every executive number is wrong</td><td><span class="pill p-n">With import module</span></td></tr>
+      <tr><td><strong>Multi-tenancy isolation</strong></td><td>Leakage is catastrophic in healthcare</td><td><span class="pill p-n">RBAC + row-level</span></td></tr>
+    </table>
+  </div>
+
+  <h3>Compliance obligations found in research, absent from the original design</h3>
+  <ul>
+    <li><strong>Law 058/2021</strong> — health data is sensitive personal data. Consent, NCSA registration as data controller, a designated data protection officer, retention policy, subject access and erasure, and cross-border transfer limits that constrain hosting region.</li>
+    <li><strong>Law 03/2012</strong> — every delivery of a narcotic or psychotropic must be registered immediately on the prescription with the patient's name and address. A statutory register, not a classification flag.</li>
+    <li><strong>Pharmacist registration</strong> — dispensing must be attributable to a professional registered with the National Pharmacy Council, with council number and licence expiry. Premises licensing is separate and carries facility standards.</li>
+    <li><strong>Cold chain</strong> — insulin and vaccines require 2–8°C. The running example product in the original specification was insulin, shipped internationally over 21–45 days, with no temperature concept anywhere in the design.</li>
+    <li><strong>GS1 DataMatrix</strong> — packs encode GTIN, expiry, batch and serial. Parsing them means a scan auto-fills batch and expiry, removing most manual entry in the system. Confirm the mandate dates that apply to Rwanda.</li>
+  </ul>
+</section>
+
+<section id="open">
+  <div class="eyebrow">Delivery</div>
+  <h2>Open decisions</h2>
+  <p class="sub">Everything else in this document is settled. These four are not, and two of them change what gets built first.</p>
+  <div class="step"><span class="stepn">01</span><div><strong style="font-size:13px">Dark theme</strong><p style="margin:2px 0 0;font-size:13px">Proposed above and used by this page's toggle. Worth confirming as in-scope, since the eleven-at-night scenario in the specification implies night shifts. The token structure supports it cleanly because every surface is already a named level.</p></div></div>
+  <div class="step"><span class="stepn">02</span><div><strong style="font-size:13px">Monetisation</strong><p style="margin:2px 0 0;font-size:13px">Subscription, transaction fee on marketplace and import, or both. Determines whether the wholesaler portal is a feature or the actual product.</p></div></div>
+  <div class="step"><span class="stepn">03</span><div><strong style="font-size:13px">Stack</strong><p style="margin:2px 0 0;font-size:13px">React and Tailwind are assumed from the source material. Backend unspecified. Hosting region constrained by the data-protection finding above.</p></div></div>
+  <div class="step"><span class="stepn">04</span><div><strong style="font-size:13px">Build sequence</strong><p style="margin:2px 0 0;font-size:13px">Design system, then module templates, then screens — never screen by screen. Pharmacy-first, because demand consolidation needs pharmacy density before importers care.</p></div></div>
+</section>
+
+</div>
+</div>
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement, btn=document.getElementById('tt');
+  function vals(){
+    var s=getComputedStyle(root);
+    var m={'h-app':'--app','h-nav':'--nav','h-top':'--top','h-con':'--content','h-sur':'--surface','h-sel':'--selected','h-br':'--brand','h-ok':'--ok','h-wa':'--warn','h-ba':'--bad'};
+    for(var k in m){var e=document.getElementById(k); if(e) e.textContent=s.getPropertyValue(m[k]).trim().toUpperCase();}
+  }
+  btn.addEventListener('click',function(){
+    var dark=root.getAttribute('data-theme')==='dark'||(!root.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme:dark)').matches);
+    root.setAttribute('data-theme',dark?'light':'dark');
+    vals();
+  });
+  vals();
+})();
+</script>
