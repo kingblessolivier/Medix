@@ -432,3 +432,38 @@ class TestSettlement:
             organization=counter["org"], product=counter["product"]
         )
         assert before - after == 10
+
+
+class TestPrefetchedRelations:
+    """A cached relation must not be trusted for settlement maths.
+
+    The API prefetches payments; reading sale.payments.all() after taking
+    a payment returns the pre-payment cache and silently reports nothing
+    settled, leaving every paid sale in PENDING_PAYMENT.
+    """
+
+    def test_settlement_is_read_from_the_database(self, counter):
+        from sales.models import Sale
+
+        sale = sell(counter)
+        payments.take_payment(
+            sale=sale, method=PaymentMethod.CASH, amount=sale.total,
+            performed_by=counter["cashier"],
+        )
+
+        # Re-fetch exactly as the viewset does, with payments prefetched.
+        cached = Sale.objects.prefetch_related("payments").get(pk=sale.pk)
+        assert payments.amount_settled(cached) == cached.total
+        assert payments.amount_outstanding(cached) == 0
+
+    def test_paying_through_a_prefetched_sale_completes_it(self, counter):
+        from sales.models import Sale
+
+        sale = sell(counter)
+        cached = Sale.objects.prefetch_related("payments").get(pk=sale.pk)
+        payments.take_payment(
+            sale=cached, method=PaymentMethod.CASH, amount=cached.total,
+            performed_by=counter["cashier"],
+        )
+        cached.refresh_from_db()
+        assert cached.status == SaleStatus.COMPLETED

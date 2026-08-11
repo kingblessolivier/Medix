@@ -5,9 +5,11 @@ import { useState } from "react";
 
 import { AppShell } from "@/components/navigation/AppShell";
 import { EmptyState } from "@/components/ui";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { api, logout, tokens } from "@/lib/api";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
+import { PosScreen } from "@/modules/pos/PosScreen";
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -20,6 +22,13 @@ export default function App() {
     enabled: signedIn,
     retry: false,
   });
+
+  const locations = useQuery({
+    queryKey: ["locations"],
+    queryFn: () => api.locations(),
+    enabled: signedIn,
+  });
+  const mainLocation = locations.data?.results.find((l) => l.code === "MAIN")?.id;
 
   if (!signedIn) {
     return (
@@ -51,14 +60,20 @@ export default function App() {
         queryClient.clear();
       }}
     >
-      {active === "inventory" ? (
-        <InventoryScreen />
-      ) : (
-        <EmptyState
-          heading="Not built yet"
-          body="This module arrives in a later phase."
-        />
-      )}
+      {/* Keyed so a failing screen resets when the user navigates away,
+          rather than staying broken until reload. */}
+      <ErrorBoundary key={active}>
+        {active === "inventory" ? (
+          <InventoryScreen />
+        ) : active === "pos" ? (
+          <PosScreen locationId={mainLocation ?? null} />
+        ) : (
+          <EmptyState
+            heading="Not built yet"
+            body="This module arrives in a later phase."
+          />
+        )}
+      </ErrorBoundary>
     </AppShell>
   );
 }

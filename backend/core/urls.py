@@ -10,4 +10,5 @@ urlpatterns = [
     path("auth/me/", views.me, name="me"),
     path("", include("catalog.urls")),
     path("", include("inventory.urls")),
+    path("", include("sales.urls")),
 ]

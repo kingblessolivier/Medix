@@ -217,9 +217,66 @@ export type ProductRow = {
   is_active: boolean;
 };
 
+export type SaleLine = {
+  id: string;
+  product_name: string;
+  batch_number: string;
+  expiry_date: string;
+  uom_code: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  tax_treatment: string;
+  tax_amount: number;
+  legal_status: string;
+  requires_prescription: boolean;
+};
+
+export type SalePayment = {
+  id: string;
+  method: string;
+  amount: number;
+  status: string;
+  provider_reference: string;
+};
+
+export type Sale = {
+  id: string;
+  number: string;
+  status: string;
+  subtotal: number;
+  tax_total: number;
+  total: number;
+  outstanding: number;
+  /** What stops this sale completing, in the words the POS shows. */
+  blocked_reason: string | null;
+  lines: SaleLine[];
+  payments: SalePayment[];
+};
+
+export type Location = { id: string; name: string; code: string };
+
 export const api = {
   me: () => request<Me>("/auth/me/"),
   stock: (params = "") => request<Paginated<StockRow>>(`/stock/${params}`),
   movements: (params = "") => request<Cursored<Movement>>(`/stock-movements/${params}`),
   products: (params = "") => request<Paginated<ProductRow>>(`/products/${params}`),
+  locations: () => request<Paginated<Location>>("/locations/"),
+
+  sale: (id: string) => request<Sale>(`/sales/${id}/`),
+  startSale: (location: string) =>
+    request<Sale>("/sales/", { method: "POST", body: { location } }),
+  addLine: (
+    id: string,
+    line: { product: string; quantity: number; uom_code: string; unit_price: number },
+  ) => request<Sale>(`/sales/${id}/lines/`, { method: "POST", body: line }),
+  completeSale: (id: string) =>
+    request<Sale>(`/sales/${id}/complete/`, {
+      method: "POST",
+      body: {},
+      // Goods and money both move here, so a retry must not double-apply.
+      idempotencyKey: crypto.randomUUID(),
+    }),
+  takePayment: (id: string, body: { method: string; amount: number }) =>
+    request<Sale>(`/sales/${id}/payments/`, { method: "POST", body }),
 };

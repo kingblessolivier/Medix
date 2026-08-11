@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from core.exceptions import DomainError
@@ -100,14 +101,27 @@ def provider_for(method: str, provider_code: str = "") -> PaymentProvider:
 # --------------------------------------------------------------------------
 
 
-def amount_settled(sale: Sale) -> int:
-    return sum(
-        p.amount for p in sale.payments.all() if p.status == PaymentStatus.CONFIRMED
+def _sum(sale: Sale, status: str) -> int:
+    """Query the database, never `sale.payments.all()`.
+
+    A view that prefetches payments hands us a cached relation captured
+    before the payment we just took. Reading it silently reports zero
+    settled and leaves every paid sale sitting in PENDING_PAYMENT.
+    """
+    return (
+        Payment.objects.filter(sale=sale, status=status).aggregate(total=Sum("amount"))[
+            "total"
+        ]
+        or 0
     )
 
 
+def amount_settled(sale: Sale) -> int:
+    return _sum(sale, PaymentStatus.CONFIRMED)
+
+
 def amount_pending(sale: Sale) -> int:
-    return sum(p.amount for p in sale.payments.all() if p.status == PaymentStatus.PENDING)
+    return _sum(sale, PaymentStatus.PENDING)
 
 
 def amount_outstanding(sale: Sale) -> int:
