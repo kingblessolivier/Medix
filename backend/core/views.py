@@ -12,3 +12,26 @@ def health(request):
         cursor.execute("SELECT 1")
         cursor.fetchone()
     return Response({"status": "ok", "database": "ok"})
+
+
+@api_view(["GET"])
+def me(request):
+    """Who am I, and which organization am I acting for."""
+    user = request.user
+    org = user.organization
+    return Response(
+        {
+            "id": str(user.id),
+            "username": user.username,
+            "name": user.get_full_name() or user.username,
+            "organization": (
+                {
+                    "id": str(org.id),
+                    "name": org.name,
+                    "primary_kind": org.primary_kind,
+                }
+                if org
+                else None
+            ),
+        }
+    )
