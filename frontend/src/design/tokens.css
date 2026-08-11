@@ -1,0 +1,242 @@
+/* Medix design tokens — the single source of colour, type, spacing, radius.
+ *
+ * Never write a literal colour, size, spacing or radius in a component.
+ * See docs/04-design-system.md, docs/26-typography.md, docs/27-layout.md.
+ *
+ * Dark is a purpose-built neutral ramp, not an inversion. The brand lifts
+ * because #0078D4 fails against a dark ground.
+ */
+
+:root {
+  /* -- surfaces: five levels, never eight ------------------------------ */
+  --app: #f4f6f8;
+  --nav: #f0f3f6;
+  --topbar: #f7f8fa;
+  --content: #f8fafc;
+  --surface: #ffffff;
+  --hover: #eef2f6;
+  --selected: #e8f1ff;
+
+  /* -- borders: two weights, deliberately ------------------------------ */
+  --border: #dce2e8;
+  --border-hair: #e4e8ec;
+
+  /* -- text ------------------------------------------------------------ */
+  --text: #17212b;
+  --text-2: #5f6b76;
+  --text-3: #8a959e;
+
+  /* -- brand and semantic ---------------------------------------------- */
+  --brand: #0078d4;
+  --brand-weak: #e8f1ff;
+  --brand-text: #0f5a9c;
+  --ok: #059669;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --ok-bg: #e7f5ef;
+  --warn-bg: #fbf0e0;
+  --bad-bg: #fbeaea;
+
+  /* -- chart: validated palette, light --------------------------------- */
+  --chart-1: #0078d4;
+  --chart-2: #b5179e;
+  --chart-3: #8a5a00;
+  --chart-4: #009b9b;
+
+  /* -- elevation ------------------------------------------------------- */
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --elev-2: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --elev-3: 0 12px 32px rgba(15, 23, 42, 0.14);
+  --scrim: rgba(15, 23, 42, 0.32);
+
+  /* -- radius ---------------------------------------------------------- */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 12px;
+
+  /* -- type ------------------------------------------------------------ */
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui,
+    -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas,
+    monospace;
+
+  /* -- layout ---------------------------------------------------------- */
+  --sidebar-w: 248px;
+  --sidebar-collapsed-w: 68px;
+  --topbar-h: 56px;
+  --content-max: 1440px;
+
+  /* -- motion ---------------------------------------------------------- */
+  --dur-fast: 100ms;
+  --dur-pop: 120ms;
+  --dur-modal: 160ms;
+  --dur-drawer: 200ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-drawer: cubic-bezier(0.2, 0, 0, 1);
+
+  /* -- z-index --------------------------------------------------------- */
+  --z-sticky: 10;
+  --z-nav: 20;
+  --z-dropdown: 30;
+  --z-drawer: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-palette: 70;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app: #14181b;
+    --nav: #101418;
+    --topbar: #171b1f;
+    --content: #1a1f24;
+    --surface: #1e242a;
+    --hover: #252c33;
+    --selected: #12314c;
+
+    --border: #2b333a;
+    --border-hair: #242b31;
+
+    --text: #e6ebef;
+    --text-2: #96a2ac;
+    --text-3: #6e7a84;
+
+    --brand: #4ca6e8;
+    --brand-weak: #12314c;
+    --brand-text: #8cc6f0;
+    --ok: #34c88a;
+    --warn: #dfa23a;
+    --bad: #ea6e66;
+    --ok-bg: #12291f;
+    --warn-bg: #2a2013;
+    --bad-bg: #2c1817;
+
+    --chart-1: #3b96e3;
+    --chart-2: #d253b4;
+    --chart-3: #b5892c;
+    --chart-4: #3b96e3;
+
+    --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --elev-2: 0 4px 12px rgba(0, 0, 0, 0.5);
+    --elev-3: 0 12px 32px rgba(0, 0, 0, 0.6);
+    --scrim: rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* The viewer's explicit choice must win over the media query in both
+ * directions, so each theme is restated under a data attribute. */
+
+:root[data-theme="dark"] {
+  --app: #14181b;
+  --nav: #101418;
+  --topbar: #171b1f;
+  --content: #1a1f24;
+  --surface: #1e242a;
+  --hover: #252c33;
+  --selected: #12314c;
+  --border: #2b333a;
+  --border-hair: #242b31;
+  --text: #e6ebef;
+  --text-2: #96a2ac;
+  --text-3: #6e7a84;
+  --brand: #4ca6e8;
+  --brand-weak: #12314c;
+  --brand-text: #8cc6f0;
+  --ok: #34c88a;
+  --warn: #dfa23a;
+  --bad: #ea6e66;
+  --ok-bg: #12291f;
+  --warn-bg: #2a2013;
+  --bad-bg: #2c1817;
+  --chart-1: #3b96e3;
+  --chart-2: #d253b4;
+  --chart-3: #b5892c;
+  --chart-4: #3b96e3;
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --scrim: rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme="light"] {
+  --app: #f4f6f8;
+  --nav: #f0f3f6;
+  --topbar: #f7f8fa;
+  --content: #f8fafc;
+  --surface: #ffffff;
+  --hover: #eef2f6;
+  --selected: #e8f1ff;
+  --border: #dce2e8;
+  --border-hair: #e4e8ec;
+  --text: #17212b;
+  --text-2: #5f6b76;
+  --text-3: #8a959e;
+  --brand: #0078d4;
+  --brand-weak: #e8f1ff;
+  --brand-text: #0f5a9c;
+  --ok: #059669;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --ok-bg: #e7f5ef;
+  --warn-bg: #fbf0e0;
+  --bad-bg: #fbeaea;
+  --chart-1: #0078d4;
+  --chart-2: #b5179e;
+  --chart-3: #8a5a00;
+  --chart-4: #009b9b;
+  --elev-1: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --elev-2: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --elev-3: 0 12px 32px rgba(15, 23, 42, 0.14);
+  --scrim: rgba(15, 23, 42, 0.32);
+}
+
+/* -- base ------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--app);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv05" 1, "ss03" 1;
+}
+
+/* Digits that line up in columns must be tabular, with a slashed zero
+ * wherever a code or batch number is read aloud or typed from a screen. */
+table,
+th,
+td,
+.tabular,
+input[type="number"] {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

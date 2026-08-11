@@ -1,0 +1,207 @@
+/* Application shell — fixed for every module.
+ *
+ * Only the content area changes, and it always follows:
+ * page header → primary workspace → secondary information.
+ *
+ * See docs/04-design-system.md, docs/19-screens.md.
+ */
+
+import clsx from "clsx";
+import {
+  ArrowLeftRight,
+  Bell,
+  ChartNoAxesCombined,
+  LayoutDashboard,
+  Moon,
+  Package,
+  Receipt,
+  Search,
+  Settings,
+  ShoppingCart,
+  Store,
+  Sun,
+  type LucideIcon,
+} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+
+export type NavItem = { id: string; label: string; icon: LucideIcon };
+export type NavGroup = { label: string; items: NavItem[] };
+
+/* One icon per concept, everywhere. Lucide only, 17px, stroke 1.8. */
+export const PHARMACY_NAV: NavGroup[] = [
+  { label: "Main", items: [{ id: "overview", label: "Overview", icon: LayoutDashboard }] },
+  {
+    label: "Operations",
+    items: [
+      { id: "inventory", label: "Inventory", icon: Package },
+      { id: "pos", label: "Point of sale", icon: Receipt },
+      { id: "transfers", label: "Transfers", icon: ArrowLeftRight },
+    ],
+  },
+  {
+    label: "Commerce",
+    items: [
+      { id: "marketplace", label: "Marketplace", icon: Store },
+      { id: "orders", label: "Orders", icon: ShoppingCart },
+    ],
+  },
+  { label: "Reporting", items: [{ id: "analytics", label: "Analytics", icon: ChartNoAxesCombined }] },
+];
+
+export function AppShell({
+  groups = PHARMACY_NAV,
+  active,
+  onNavigate,
+  children,
+}: {
+  groups?: NavGroup[];
+  active: string;
+  onNavigate: (id: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex min-h-screen bg-app">
+      <Sidebar groups={groups} active={active} onNavigate={onNavigate} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar />
+        <main className="mx-auto w-full max-w-content flex-1 p-6">{children}</main>
+        <StatusBar />
+      </div>
+    </div>
+  );
+}
+
+/* -- Sidebar ----------------------------------------------------------- */
+
+function Sidebar({
+  groups,
+  active,
+  onNavigate,
+}: {
+  groups: NavGroup[];
+  active: string;
+  onNavigate: (id: string) => void;
+}) {
+  return (
+    /* Tinted, not white — the sidebar is part of the application shell,
+     * not another floating card. */
+    <nav
+      aria-label="Main"
+      className="z-nav hidden w-sidebar shrink-0 border-r border-border bg-nav py-4 md:block"
+    >
+      <div className="flex items-center gap-2 px-4 pb-4">
+        <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-brand" />
+        <span className="text-section font-semibold tracking-tight">Medix</span>
+      </div>
+
+      {groups.map((group) => (
+        <div key={group.label}>
+          <p className="px-4 pb-1.5 pt-3 text-group font-semibold uppercase text-text-3">
+            {group.label}
+          </p>
+          {group.items.map((item) => {
+            const Icon = item.icon;
+            const isActive = item.id === active;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onNavigate(item.id)}
+                aria-current={isActive ? "page" : undefined}
+                className={clsx(
+                  "flex h-9 w-full items-center gap-2 border-l-2 px-3 text-body transition-colors",
+                  isActive
+                    ? "border-brand bg-selected font-medium text-brand-text"
+                    : "border-transparent text-text-2 hover:bg-hover hover:text-text",
+                )}
+              >
+                <Icon size={17} strokeWidth={1.8} className={isActive ? "text-brand" : ""} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+
+      <div className="mx-3 my-3 border-t border-border" />
+      <button
+        type="button"
+        className="flex h-9 w-full items-center gap-2 border-l-2 border-transparent px-3 text-body text-text-2 transition-colors hover:bg-hover hover:text-text"
+      >
+        <Settings size={17} strokeWidth={1.8} />
+        Settings
+      </button>
+    </nav>
+  );
+}
+
+/* -- Top bar ----------------------------------------------------------- */
+
+function TopBar() {
+  return (
+    /* Disappears into the environment — same neutral family as the
+     * workspace, separated by a 1px divider. */
+    <header className="sticky top-0 z-nav flex h-topbar items-center gap-3 border-b border-border bg-topbar px-6">
+      <span className="text-section font-semibold tracking-tight md:hidden">Medix</span>
+
+      {/* Quiet until focused. A search field that shouts competes with
+       * the content. */}
+      <button
+        type="button"
+        className="flex h-8 w-full max-w-[420px] items-center gap-2 rounded-md bg-hover px-3 text-left text-body text-text-3 transition-colors hover:ring-1 hover:ring-border"
+      >
+        <Search size={15} strokeWidth={1.8} />
+        <span>Search products, orders, batches…</span>
+        <kbd className="ml-auto font-sans text-help">⌘K</kbd>
+      </button>
+
+      <div className="ml-auto flex items-center gap-3">
+        <ThemeToggle />
+        <button type="button" aria-label="Notifications" className="text-text-2 hover:text-text">
+          <Bell size={17} strokeWidth={1.8} />
+        </button>
+        <span className="grid h-7 w-7 place-items-center rounded-full bg-brand-weak text-help font-semibold text-brand-text">
+          MU
+        </span>
+      </div>
+    </header>
+  );
+}
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(
+    () =>
+      document.documentElement.dataset.theme === "dark" ||
+      (!document.documentElement.dataset.theme &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches),
+  );
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  }, [dark]);
+
+  return (
+    <button
+      type="button"
+      onClick={() => setDark((d) => !d)}
+      aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+      className="text-text-2 hover:text-text"
+    >
+      {dark ? <Sun size={17} strokeWidth={1.8} /> : <Moon size={17} strokeWidth={1.8} />}
+    </button>
+  );
+}
+
+/* -- Status bar -------------------------------------------------------- */
+
+function StatusBar() {
+  return (
+    <footer className="flex items-center gap-4 border-t border-border px-6 py-2 text-help text-text-3">
+      <span className="flex items-center gap-1.5">
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ok" />
+        All systems operational
+      </span>
+      <span className="ml-auto">v0.1.0</span>
+    </footer>
+  );
+}
