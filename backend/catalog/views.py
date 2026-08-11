@@ -9,7 +9,10 @@ from __future__ import annotations
 from django_filters import rest_framework as filters
 from rest_framework import viewsets
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from catalog.gs1 import GS1ParseError
 from catalog.models import Category, Product, ProductType
 from catalog.serializers import (
     CategorySerializer,
@@ -17,7 +20,11 @@ from catalog.serializers import (
     ProductListSerializer,
     ProductTypeSerializer,
     ProductWriteSerializer,
+    ScanInputSerializer,
+    ScanResultSerializer,
 )
+from catalog.services import resolve_scan
+from core.exceptions import DomainError
 
 
 class ProductFilter(filters.FilterSet):
@@ -71,3 +78,24 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return Category.tenant_objects.all()
+
+
+class ScanView(APIView):
+    """Resolve a scanned GS1 barcode to a product and batch.
+
+    Fills batch and expiry at receiving, and resolves the exact batch at
+    point of sale. A malformed barcode returns 422 with the reason; an
+    unrecognised GTIN returns 200 with matched=false and whatever the
+    barcode did carry, so the operator can decide.
+    """
+
+    def post(self, request):
+        payload = ScanInputSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        try:
+            result = resolve_scan(request.user.organization, payload.validated_data["code"])
+        except GS1ParseError as exc:
+            raise DomainError(str(exc), code="invalid_barcode")
+
+        return Response(ScanResultSerializer(result).data)

@@ -167,3 +167,35 @@ class ProductWriteSerializer(serializers.ModelSerializer):
                 {"controlled_schedule": "Required for a controlled product."}
             )
         return data
+
+
+class ScanInputSerializer(serializers.Serializer):
+    """The raw string a scanner emits, control characters and all."""
+
+    code = serializers.CharField(max_length=200, trim_whitespace=False)
+
+
+class ScanResultSerializer(serializers.Serializer):
+    """What the barcode carried, and what it matched.
+
+    Fields the barcode did not carry come back null. A scan never invents
+    data.
+    """
+
+    gtin = serializers.CharField(allow_null=True)
+    batch_number = serializers.CharField(allow_null=True)
+    expiry_date = serializers.DateField(allow_null=True)
+    serial = serializers.CharField(allow_null=True)
+    matched = serializers.BooleanField()
+    product = ProductListSerializer(allow_null=True)
+    batch = serializers.SerializerMethodField()
+
+    def get_batch(self, obj) -> dict | None:
+        batch = obj.get("batch")
+        if batch is None:
+            return None
+        return {
+            "id": str(batch.id),
+            "batch_number": batch.batch_number,
+            "expiry_date": batch.expiry_date,
+        }
