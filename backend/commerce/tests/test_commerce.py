@@ -25,7 +25,7 @@ from core.exceptions import LicenceInvalid
 from core.quantity import Quantity
 from core.models import Branch, LicenceKind, LicenceStatus, Organization, PremisesLicence, User
 from inventory import services as inventory
-from inventory.models import MovementKind, StockStatus
+from inventory.models import Batch, MovementKind, StockStatus
 from inventory.tests.factories import make_batch, make_location, make_org, make_product, uom
 
 pytestmark = pytest.mark.django_db
@@ -1170,3 +1170,132 @@ class TestOrderUnits:
             services.add_order_line(
                 order=self._order(market), listing=listing, quantity=1, uom=uom(other, "PACK")
             )
+
+
+class TestLandedCost:
+    """Freight, duty and clearing belong inside batch cost.
+
+    A depot's capital is not the invoice. If those charges sit beside the
+    batch instead of in it, every margin computed downstream is
+    overstated — and it is overstated invisibly, because each individual
+    line looks right.
+    """
+
+    def _receipt(self, market, **kwargs):
+        return services.start_receipt(
+            organization=market["wholesale"],
+            location=market["depot"],
+            supplier=None,
+            performed_by=market["seller"],
+            **kwargs,
+        )
+
+    def _add(self, receipt, market, product=None, accepted=10, cost=1000, batch="IMP-1"):
+        product = product or market["product"]
+        return services.add_receipt_line(
+            receipt=receipt,
+            product=product,
+            uom=uom(product, "PACK"),
+            received=accepted,
+            batch_number=batch,
+            expiry_date=date.today() + timedelta(days=600),
+            unit_cost_base=cost,
+        )
+
+    def test_charges_land_inside_unit_cost(self, market):
+        """100 packs of 100 at 1,000 a unit, plus 200,000 of freight."""
+        receipt = self._receipt(market)
+        receipt.freight = 200_000
+        receipt.save(update_fields=["freight"])
+        self._add(receipt, market, accepted=10, cost=1000)
+
+        services.post_receipt(receipt=receipt, performed_by=market["seller"])
+
+        batch = Batch.objects.get(organization=market["wholesale"], batch_number="IMP-1")
+        # 10 packs x 100 = 1,000 base units carrying 200,000 of freight,
+        # so 200 a unit on top of the 1,000 invoiced.
+        assert batch.unit_cost_base == 1200
+
+    def test_apportionment_is_exact_to_the_franc(self, market):
+        """Three lines and a charge that does not divide cleanly.
+
+        The parts must sum to the whole. Landed cost that does not
+        reconcile is capital missing from the books.
+        """
+        other = make_product(market["wholesale"], "Paracetamol 500mg")
+        third = make_product(market["wholesale"], "Ibuprofen 400mg")
+        receipt = self._receipt(market)
+        receipt.freight = 100_001
+        receipt.save(update_fields=["freight"])
+        self._add(receipt, market, accepted=3, cost=700, batch="A-1")
+        self._add(receipt, market, product=other, accepted=5, cost=1100, batch="B-1")
+        self._add(receipt, market, product=third, accepted=7, cost=1300, batch="C-1")
+
+        shares = services.apportion_landed_cost(receipt)
+        assert sum(shares.values()) == 100_001
+
+    def test_split_is_by_value_not_by_count(self, market):
+        """A carton of insulin and one of gauze do not share duty evenly.
+
+        Splitting by count would move cost off the expensive line onto
+        the cheap one, inverting which product looks profitable.
+        """
+        cheap = make_product(market["wholesale"], "Gauze swabs")
+        receipt = self._receipt(market)
+        receipt.customs_duty = 90_000
+        receipt.save(update_fields=["customs_duty"])
+        self._add(receipt, market, accepted=10, cost=8000, batch="EXP-1")
+        self._add(receipt, market, product=cheap, accepted=10, cost=1000, batch="CHP-1")
+
+        shares = list(services.apportion_landed_cost(receipt).values())
+        assert sum(shares) == 90_000
+        # 8:1 by value, so the expensive line takes eight times the duty.
+        assert shares[0] == 80_000
+        assert shares[1] == 10_000
+
+    def test_free_goods_still_carry_freight(self, market):
+        """Donations and samples cost money to land.
+
+        With no value to weight by, the split falls back to quantity
+        rather than refusing to apportion at all.
+        """
+        other = make_product(market["wholesale"], "Donated ORS")
+        receipt = self._receipt(market)
+        receipt.freight = 40_000
+        receipt.save(update_fields=["freight"])
+        self._add(receipt, market, accepted=10, cost=0, batch="FREE-1")
+        self._add(receipt, market, product=other, accepted=30, cost=0, batch="FREE-2")
+
+        shares = list(services.apportion_landed_cost(receipt).values())
+        assert sum(shares) == 40_000
+        assert shares[0] == 10_000
+        assert shares[1] == 30_000
+
+    def test_no_charges_leaves_cost_untouched(self, market):
+        receipt = self._receipt(market)
+        self._add(receipt, market, accepted=4, cost=2500, batch="PLAIN-1")
+        services.post_receipt(receipt=receipt, performed_by=market["seller"])
+
+        batch = Batch.objects.get(organization=market["wholesale"], batch_number="PLAIN-1")
+        assert batch.unit_cost_base == 2500
+
+    def test_foreign_invoice_converts_before_landing(self, market):
+        """Goods invoiced in USD, charges incurred in RWF.
+
+        The rate is applied with integer arithmetic — a float would drift
+        a franc or two per line straight into stock valuation.
+        """
+        receipt = self._receipt(market)
+        receipt.invoice_currency = "USD"
+        receipt.fx_rate_scaled = 13_205_000  # 1 USD = 1,320.50 RWF
+        receipt.fx_rate_date = date.today()
+        receipt.fx_rate_is_official = True
+        receipt.save(update_fields=[
+            "invoice_currency", "fx_rate_scaled", "fx_rate_date", "fx_rate_is_official",
+        ])
+        self._add(receipt, market, accepted=2, cost=100, batch="USD-1")
+
+        services.post_receipt(receipt=receipt, performed_by=market["seller"])
+        batch = Batch.objects.get(organization=market["wholesale"], batch_number="USD-1")
+        # 100 USD-cents a unit at 1,320.50 → 132,050 RWF minor units.
+        assert batch.unit_cost_base == 132_050

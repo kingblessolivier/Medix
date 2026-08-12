@@ -696,6 +696,50 @@ def add_receipt_line(
     )
 
 
+def _to_rwf(amount: int, receipt: GoodsReceipt) -> int:
+    """An invoiced amount restated in RWF.
+
+    The rate is stored scaled by 10,000 and applied with integer
+    arithmetic — a float here would drift by a franc or two per line and
+    the drift would land in stock valuation, where nobody would look for
+    it.
+    """
+    if receipt.invoice_currency == "RWF":
+        return amount
+    return amount * receipt.fx_rate_scaled // 10_000
+
+
+def apportion_landed_cost(receipt: GoodsReceipt) -> dict[str, int]:
+    """Spread freight, duty and clearing across the accepted lines.
+
+    **By value, not by count.** A carton of insulin and a carton of gauze
+    do not consume the same share of a customs bill, and splitting evenly
+    would move cost from the expensive line to the cheap one — quietly
+    inverting which products look profitable.
+
+    `Money.allocate` distributes the remainder a franc at a time, largest
+    share first, so the parts sum to the whole exactly. Landed cost that
+    does not reconcile is capital that has gone missing from the books.
+    """
+    lines = [line for line in receipt.lines.all() if line.accepted > 0]
+    if not lines:
+        return {}
+
+    charges = receipt.landed_charges
+    if charges <= 0:
+        return {str(line.id): 0 for line in lines}
+
+    weights = [_to_rwf(line.unit_cost_base, receipt) * line.accepted * line.uom.factor_to_base
+               for line in lines]
+    if sum(weights) == 0:
+        # Free goods — samples or donations — still carry freight, so
+        # fall back to splitting by quantity rather than refusing.
+        weights = [line.accepted * line.uom.factor_to_base for line in lines]
+
+    shares = Money(charges, "RWF").allocate(weights)
+    return {str(line.id): share.amount for line, share in zip(lines, shares)}
+
+
 @transaction.atomic
 def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
     """Create the batches and move the stock.
@@ -712,10 +756,20 @@ def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
         raise DomainError("Add a line before posting.", code="receipt_empty")
 
     receipt.number = sequences.next_number(receipt.organization, "GOODS_RECEIPT")
+    shares = apportion_landed_cost(receipt)
 
     for line in lines:
         if line.accepted <= 0:
             continue
+
+        # What this stock actually cost to have on the shelf: the invoice
+        # converted to RWF, plus its share of getting it here.
+        share = shares.get(str(line.id), 0)
+        accepted_base = Quantity(line.accepted, line.uom).base_value
+        landed_unit_cost = _to_rwf(line.unit_cost_base, receipt) + (
+            share // accepted_base if accepted_base else 0
+        )
+        line.landed_cost_share = share
 
         batch, _ = Batch.objects.get_or_create(
             organization=receipt.organization,
@@ -725,7 +779,7 @@ def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
             defaults={
                 "expiry_date": line.expiry_date,
                 "manufacture_date": line.manufacture_date,
-                "unit_cost_base": line.unit_cost_base,
+                "unit_cost_base": landed_unit_cost,
                 "cold_chain": line.product.cold_chain,
                 "gtin": line.gtin,
                 "serial": line.serial,
@@ -733,7 +787,7 @@ def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
             },
         )
         line.batch = batch
-        line.save(update_fields=["batch"])
+        line.save(update_fields=["batch", "landed_cost_share"])
 
         inventory.post_movement(
             organization=receipt.organization,

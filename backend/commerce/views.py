@@ -22,6 +22,7 @@ from commerce import services
 from commerce.models import (
     Availability,
     GoodsReceipt,
+    GoodsReceiptStatus,
     PurchaseOrder,
     PurchaseOrderLine,
     TradingRelationship,
@@ -29,6 +30,7 @@ from commerce.models import (
 )
 from commerce.serializers import (
     AddOrderLineSerializer,
+    LandedCostSerializer,
     AddReceiptLineSerializer,
     DispatchSerializer,
     GoodsReceiptSerializer,
@@ -41,6 +43,7 @@ from commerce.serializers import (
     TradingRelationshipSerializer,
 )
 from core.exceptions import DomainError
+from core.quantity import compose
 from core.models import Organization
 from inventory import services as inventory
 from inventory.models import Batch, Location
@@ -406,11 +409,31 @@ class GoodsReceiptViewSet(
                 performed_by=request.user,
             )
 
+        line_uom = _resolve_uom(product, data["uom_code"])
+        received = data.get("received")
+        if data.get("entries"):
+            # "Ten cartons and eight packs" — compose to base units, then
+            # restate in the line's unit so one number reaches the ledger.
+            base = compose(
+                [
+                    (entry["count"], _resolve_uom(product, entry["uom_code"]))
+                    for entry in data["entries"]
+                ]
+            )
+            if base % line_uom.factor_to_base:
+                raise DomainError(
+                    f"That count is not a whole number of {line_uom.code.lower()}.",
+                    code="fractional_unit",
+                )
+            received = base // line_uom.factor_to_base
+        if received is None:
+            raise DomainError("Give a quantity.", code="quantity_required")
+
         services.add_receipt_line(
             receipt=receipt,
             product=product,
-            uom=_resolve_uom(product, data["uom_code"]),
-            received=data["received"],
+            uom=line_uom,
+            received=received,
             accepted=data.get("accepted"),
             rejected=data.get("rejected", 0),
             rejection_reason=data.get("rejection_reason", ""),
@@ -424,11 +447,41 @@ class GoodsReceiptViewSet(
         receipt.refresh_from_db()
         return Response(GoodsReceiptSerializer(receipt).data)
 
+    @action(detail=True, methods=["post"], url_path="landed-cost")
+    def landed_cost(self, request, pk=None):
+        """Record what it cost to get the goods here.
+
+        Set before posting: apportionment happens at post time, and a
+        posted receipt has already written its costs into batch cost.
+        """
+        receipt = self.get_object()
+        if receipt.status == GoodsReceiptStatus.POSTED:
+            raise DomainError(
+                "This receipt is posted; its costs are already in the batches.",
+                code="already_posted",
+            )
+        payload = LandedCostSerializer(data=request.data, partial=True)
+        payload.is_valid(raise_exception=True)
+        for field, value in payload.validated_data.items():
+            setattr(receipt, field, value)
+        receipt.save()
+        return Response(GoodsReceiptSerializer(receipt).data)
+
+    @action(detail=True, methods=["get"], url_path="landed-cost-preview")
+    def landed_cost_preview(self, request, pk=None):
+        """What each line would carry, before committing to it."""
+        return Response(services.apportion_landed_cost(self.get_object()))
+
     @action(detail=True, methods=["post"])
     def post_receipt(self, request, pk=None):
         """Create the batches and move the stock."""
         receipt = services.post_receipt(receipt=self.get_object(), performed_by=request.user)
-        return Response(GoodsReceiptSerializer(receipt).data)
+        # Re-read rather than serialize the object we just mutated: this
+        # viewset prefetches lines, so the cached rows still hold their
+        # pre-posting values and the response would report a zero landed
+        # cost that the database does not agree with.
+        fresh = self.get_queryset().get(pk=receipt.pk)
+        return Response(GoodsReceiptSerializer(fresh).data)
 
     @action(detail=True, methods=["get"])
     def discrepancies(self, request, pk=None):

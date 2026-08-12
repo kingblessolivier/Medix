@@ -284,6 +284,7 @@ class GoodsReceiptLineSerializer(serializers.ModelSerializer):
             "batch_number",
             "expiry_date",
             "unit_cost_base",
+            "landed_cost_share",
             "gtin",
         ]
 
@@ -293,6 +294,7 @@ class GoodsReceiptSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source="supplier.name", read_only=True, default=None)
     location_name = serializers.CharField(source="location.name", read_only=True)
     has_discrepancy = serializers.BooleanField(read_only=True)
+    landed_charges = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = GoodsReceipt
@@ -309,6 +311,16 @@ class GoodsReceiptSerializer(serializers.ModelSerializer):
             "posted_at",
             "transport_temperature_ok",
             "has_discrepancy",
+            "invoice_number",
+            "invoice_currency",
+            "fx_rate_scaled",
+            "fx_rate_date",
+            "fx_rate_is_official",
+            "freight",
+            "customs_duty",
+            "clearing_fees",
+            "other_charges",
+            "landed_charges",
             "lines",
         ]
 
@@ -319,10 +331,31 @@ class StartReceiptSerializer(serializers.Serializer):
     supplier = serializers.UUIDField(required=False, allow_null=True)
 
 
+class QuantityEntrySerializer(serializers.Serializer):
+    """One rung of a mixed-unit count."""
+
+    uom_code = serializers.CharField(max_length=20)
+    count = serializers.IntegerField(min_value=0)
+
+
+class LandedCostSerializer(serializers.Serializer):
+    invoice_number = serializers.CharField(max_length=60, required=False, allow_blank=True)
+    invoice_currency = serializers.CharField(max_length=3, required=False)
+    fx_rate_scaled = serializers.IntegerField(min_value=1, required=False)
+    fx_rate_date = serializers.DateField(required=False, allow_null=True)
+    fx_rate_is_official = serializers.BooleanField(required=False)
+    freight = serializers.IntegerField(min_value=0, required=False)
+    customs_duty = serializers.IntegerField(min_value=0, required=False)
+    clearing_fees = serializers.IntegerField(min_value=0, required=False)
+    other_charges = serializers.IntegerField(min_value=0, required=False)
+
+
 class AddReceiptLineSerializer(serializers.Serializer):
     product = serializers.UUIDField()
     uom_code = serializers.CharField(max_length=20)
-    received = serializers.IntegerField(min_value=0)
+    received = serializers.IntegerField(min_value=0, required=False)
+    #: Instead of `received`: a count across several levels at once.
+    entries = QuantityEntrySerializer(many=True, required=False)
     accepted = serializers.IntegerField(min_value=0, required=False, allow_null=True)
     rejected = serializers.IntegerField(min_value=0, default=0)
     rejection_reason = serializers.CharField(max_length=200, required=False, allow_blank=True)

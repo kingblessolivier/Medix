@@ -275,6 +275,32 @@ class GoodsReceipt(TenantModel):
         max_length=10, choices=GoodsReceiptStatus.choices, default=GoodsReceiptStatus.DRAFT
     )
     received_on = models.DateField(default=timezone.localdate)
+
+    # -- import: what it cost to get the goods here ------------------------
+    #
+    # A depot's capital is not the invoice. Freight, duty and clearing are
+    # real money spent acquiring the stock, and if they sit beside the
+    # batch instead of inside it every downstream margin is overstated.
+    # They are apportioned into unit cost when the receipt posts.
+    #
+    # Charges are held in RWF because that is where they are incurred —
+    # a clearing agent in Kigali does not bill in euro — while the goods
+    # themselves may be invoiced in anything.
+    invoice_number = models.CharField(max_length=60, blank=True)
+    invoice_currency = models.CharField(max_length=3, default="RWF")
+    #: Foreign currency per 1 RWF is unusable at these magnitudes, so this
+    #: is RWF per one unit of invoice_currency, scaled by 10,000 to keep
+    #: it an integer. 1 USD = 1,320.50 RWF is stored as 13,205,000.
+    fx_rate_scaled = models.BigIntegerField(default=10_000)
+    fx_rate_date = models.DateField(null=True, blank=True)
+    #: True when the rate is the published official one rather than an
+    #: indicative quote. An estimate must not be mistaken for a fact.
+    fx_rate_is_official = models.BooleanField(default=False)
+
+    freight = models.BigIntegerField(default=0)
+    customs_duty = models.BigIntegerField(default=0)
+    clearing_fees = models.BigIntegerField(default=0)
+    other_charges = models.BigIntegerField(default=0)
     posted_at = models.DateTimeField(null=True, blank=True)
 
     #: Confirmed at the door for a cold-chain delivery. A breach quarantines
@@ -298,6 +324,16 @@ class GoodsReceipt(TenantModel):
     @property
     def has_discrepancy(self) -> bool:
         return any(line.is_short or line.rejected > 0 for line in self.lines.all())
+
+    @property
+    def landed_charges(self) -> int:
+        """Everything spent getting the goods here, in RWF minor units."""
+        return self.freight + self.customs_duty + self.clearing_fees + self.other_charges
+
+    @property
+    def fx_rate(self) -> float:
+        """For display only. Never use this for money arithmetic."""
+        return self.fx_rate_scaled / 10_000
 
 
 class GoodsReceiptLine(BaseModel):
@@ -332,6 +368,10 @@ class GoodsReceiptLine(BaseModel):
     batch = models.ForeignKey(
         "inventory.Batch", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+
+    #: Share of the receipt's freight, duty and clearing, in RWF minor
+    #: units. Written when the receipt posts.
+    landed_cost_share = models.BigIntegerField(default=0)
 
     class Meta:
         db_table = "commerce_goods_receipt_line"
