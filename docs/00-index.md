@@ -104,3 +104,5 @@ Documentation is updated in the same pull request as the change it describes. St
 | A domain term | [12](12-glossary.md) |
 | Anything user-visible | [CHANGELOG](../CHANGELOG.md) |
 - [28 — Distribution specification](28-distribution-spec.md) — depot-to-retail model, the schema reconciliation, and the open queue
+- [29 — Alerts and warnings](29-alerts.md) — three severities, alert fatigue, and the clinical line
+- [30 — Delivery plan](30-delivery-plan.md) — the staged plan for the distribution system
