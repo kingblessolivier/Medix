@@ -115,14 +115,47 @@ const CONTROL =
 export function Input({
   invalid,
   className,
+  icon: Icon,
+  trailing,
   ...rest
-}: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
-  return (
+}: InputHTMLAttributes<HTMLInputElement> & {
+  invalid?: boolean;
+  /** Leading affordance — what kind of value this is. */
+  icon?: LucideIcon;
+  /** Trailing control, e.g. a reveal toggle. Must be focusable. */
+  trailing?: ReactNode;
+}) {
+  const field = (
     <input
-      className={clsx(CONTROL, invalid ? "border-bad" : "border-control", className)}
+      className={clsx(
+        CONTROL,
+        invalid ? "border-bad" : "border-control",
+        Icon && "pl-9",
+        trailing && "pr-10",
+        className,
+      )}
       aria-invalid={invalid || undefined}
       {...rest}
     />
+  );
+
+  if (!Icon && !trailing) return field;
+
+  return (
+    <div className="relative">
+      {Icon && (
+        <Icon
+          size={16}
+          strokeWidth={1.8}
+          aria-hidden
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-3"
+        />
+      )}
+      {field}
+      {trailing && (
+        <span className="absolute right-1.5 top-1/2 -translate-y-1/2">{trailing}</span>
+      )}
+    </div>
   );
 }
 
