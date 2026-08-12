@@ -12,6 +12,7 @@ import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
 import { MarketplaceScreen } from "@/modules/marketplace/MarketplaceScreen";
 import { OrdersScreen } from "@/modules/orders/OrdersScreen";
 import { PosScreen } from "@/modules/pos/PosScreen";
+import { ImportReceiptScreen } from "@/modules/receiving/ImportReceiptScreen";
 import { ReceivingScreen } from "@/modules/receiving/ReceivingScreen";
 
 export default function App() {
@@ -98,6 +99,8 @@ export default function App() {
           <OrdersScreen canSupply={canSupply} locationId={mainLocation ?? null} />
         ) : active === "receiving" ? (
           <ReceivingScreen locationId={mainLocation ?? null} />
+        ) : active === "import" ? (
+          <ImportReceiptScreen locationId={mainLocation ?? null} />
         ) : (
           <EmptyState
             heading="Not built yet"

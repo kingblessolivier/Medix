@@ -217,6 +217,25 @@ export type ProductRow = {
   is_active: boolean;
 };
 
+export type UnitOfMeasureRow = {
+  id: string;
+  code: string;
+  name: string;
+  factor_to_base: number;
+  is_base: boolean;
+  is_purchase_default: boolean;
+  is_dispense_default: boolean;
+  is_sellable: boolean;
+};
+
+/** Product detail — carries the packaging chain the list view omits. */
+export type ProductDetail = ProductRow & {
+  units: UnitOfMeasureRow[];
+  strength: string;
+  dosage_form: string;
+  route: string;
+};
+
 export type SaleLine = {
   id: string;
   product_name: string;
@@ -374,7 +393,24 @@ export type ReceiptLine = {
   batch_number: string;
   expiry_date: string;
   unit_cost_base: number;
+  landed_cost_share: number;
   gtin: string;
+};
+
+/** One rung of a mixed-unit count: "2 cartons", "5 packs". */
+export type QuantityEntry = { uom_code: string; count: number };
+
+export type LandedCost = {
+  invoice_number?: string;
+  invoice_currency?: string;
+  /** RWF per one unit of invoice_currency, x10,000. Never a float. */
+  fx_rate_scaled?: number;
+  fx_rate_date?: string | null;
+  fx_rate_is_official?: boolean;
+  freight?: number;
+  customs_duty?: number;
+  clearing_fees?: number;
+  other_charges?: number;
 };
 
 export type GoodsReceipt = {
@@ -390,6 +426,16 @@ export type GoodsReceipt = {
   posted_at: string | null;
   transport_temperature_ok: boolean;
   has_discrepancy: boolean;
+  invoice_number: string;
+  invoice_currency: string;
+  fx_rate_scaled: number;
+  fx_rate_date: string | null;
+  fx_rate_is_official: boolean;
+  freight: number;
+  customs_duty: number;
+  clearing_fees: number;
+  other_charges: number;
+  landed_charges: number;
   lines: ReceiptLine[];
 };
 
@@ -421,6 +467,7 @@ export const api = {
   stock: (params = "") => request<Paginated<StockRow>>(`/stock/${params}`),
   movements: (params = "") => request<Cursored<Movement>>(`/stock-movements/${params}`),
   products: (params = "") => request<Paginated<ProductRow>>(`/products/${params}`),
+  product: (id: string) => request<ProductDetail>(`/products/${id}/`),
   locations: () => request<Paginated<Location>>("/locations/"),
 
   sale: (id: string) => request<Sale>(`/sales/${id}/`),
@@ -478,7 +525,9 @@ export const api = {
     body: {
       product: string;
       uom_code: string;
-      received: number;
+      received?: number;
+      /** Instead of `received`: a count across several levels at once. */
+      entries?: QuantityEntry[];
       accepted?: number;
       rejected?: number;
       rejection_reason?: string;
@@ -488,6 +537,10 @@ export const api = {
       order_line?: string;
     },
   ) => request<GoodsReceipt>(`/goods-receipts/${id}/lines/`, { method: "POST", body }),
+  setLandedCost: (id: string, body: LandedCost) =>
+    request<GoodsReceipt>(`/goods-receipts/${id}/landed-cost/`, { method: "POST", body }),
+  landedCostPreview: (id: string) =>
+    request<Record<string, number>>(`/goods-receipts/${id}/landed-cost-preview/`),
   postReceipt: (id: string) =>
     request<GoodsReceipt>(`/goods-receipts/${id}/post_receipt/`, { method: "POST", body: {} }),
   discrepancies: (id: string) =>

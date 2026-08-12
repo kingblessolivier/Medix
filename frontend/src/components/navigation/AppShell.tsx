@@ -16,6 +16,7 @@ import {
   Moon,
   Package,
   PackageCheck,
+  PackagePlus,
   Receipt,
   Search,
   Settings,
@@ -51,6 +52,11 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
     { id: "orders", label: "Orders", icon: ShoppingCart },
     { id: "receiving", label: "Receiving", icon: PackageCheck },
   ];
+  // Only a depot imports. A retail pharmacy receives against an order it
+  // placed; it does not clear a consignment through customs.
+  if (can("PUBLISH_LISTINGS")) {
+    commerce.push({ id: "import", label: "Import receipt", icon: PackagePlus });
+  }
 
   const groups: NavGroup[] = [
     { label: "Main", items: [{ id: "overview", label: "Overview", icon: LayoutDashboard }] },
