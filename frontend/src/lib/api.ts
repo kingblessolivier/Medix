@@ -341,6 +341,139 @@ export type OrderLine = {
   undispatched_base: number;
 };
 
+/* -- pharmacies, catalogue admin, clinical ----------------------------- */
+
+/** A pharmacy this depot registered, and where it stands. */
+export type Pharmacy = {
+  id: string;
+  name: string;
+  tin: string;
+  primary_kind: string;
+  licence_number: string;
+  licence_expiry: string | null;
+  licence_valid: boolean;
+  is_verified: boolean;
+  is_active: boolean;
+  credit_limit: number;
+  payment_terms_days: number;
+  outstanding: number;
+};
+
+/** Returned once, on registration. Never retrievable again. */
+export type RegisteredPharmacy = {
+  organization: { id: string; name: string; primary_kind: string; tin: string };
+  licence: { number: string; kind: string; expiry: string };
+  administrator: { username: string; email: string };
+  temporary_password: string;
+  relationship: string | null;
+};
+
+export type Manufacturer = {
+  id: string;
+  name: string;
+  country_of_origin: string;
+  gmp_certified: boolean;
+  gmp_expiry: string | null;
+  is_active: boolean;
+  product_count: number;
+};
+
+export type Category = { id: string; name: string };
+
+export type PatientAllergy = {
+  id: string;
+  patient: string;
+  allergen: string;
+  severity: string;
+  severity_label: string;
+  note: string;
+  recorded_on: string;
+};
+
+export type Patient = {
+  id: string;
+  full_name: string;
+  address: string;
+  phone: string;
+  national_id: string;
+  date_of_birth: string | null;
+  age_years: number | null;
+  sex: string;
+  is_pregnant: boolean | null;
+  allergies: PatientAllergy[];
+};
+
+export type Prescriber = {
+  id: string;
+  full_name: string;
+  council_number: string;
+  facility: string;
+};
+
+export type Prescription = {
+  id: string;
+  number: string;
+  patient: Patient;
+  prescriber: string | null;
+  issued_on: string | null;
+  status: string;
+  is_verified: boolean;
+  verified_at: string | null;
+  verified_by_council_number: string;
+};
+
+/** A threshold, with the dates it applied between. */
+export type AlertRule = {
+  id: string;
+  code: string;
+  severity: string;
+  threshold: Record<string, number>;
+  is_active: boolean;
+  effective_from: string;
+  effective_to: string | null;
+};
+
+export type ControlledQuota = {
+  id: string;
+  schedule: string;
+  period: string;
+  limit_base: number;
+  authority_reference: string;
+  effective_from: string;
+  effective_to: string | null;
+};
+
+export type TaxRule = {
+  id: string;
+  treatment: string;
+  rate_basis_points: number;
+  effective_from: string;
+  effective_to: string | null;
+};
+
+/** Everywhere a batch went — the question a recall actually asks. */
+export type BatchTrace = {
+  batch: string;
+  product: string;
+  expiry_date: string;
+  patients: {
+    sale: string;
+    occurred_at: string;
+    patient: string;
+    phone: string;
+    quantity_base: number;
+  }[];
+  customers: {
+    delivery_note: string;
+    dispatched_at: string | null;
+    customer: string;
+    quantity_base: number;
+  }[];
+  dispensed_base: number;
+  dispatched_base: number;
+  on_hand_base: number;
+};
+
 /* -- documents --------------------------------------------------------- */
 
 /* Named MedixDocument because `Document` is the DOM global, and shadowing
@@ -764,6 +897,138 @@ export const api = {
   }) => request<Expense>("/expenses/", { method: "POST", body }),
 
   writeOffs: () => request<Paginated<WriteOff>>("/write-offs/"),
+
+  /* -- pharmacies ------------------------------------------------------ */
+
+  pharmacies: () => request<Pharmacy[]>("/pharmacies/"),
+  registerPharmacy: (body: Record<string, unknown>) =>
+    request<RegisteredPharmacy>("/pharmacies/register/", { method: "POST", body }),
+
+  /* -- stock movements ------------------------------------------------- */
+
+  transferStock: (body: {
+    batch: string;
+    from_location: string;
+    to_location: string;
+    quantity: number;
+    uom_code?: string;
+    reason?: string;
+  }) =>
+    request<{ reference: string }>("/stock/transfer/", {
+      method: "POST",
+      body,
+      // Stock moves here, so a retry must not move it twice.
+      idempotencyKey: crypto.randomUUID(),
+    }),
+  quarantineStock: (body: {
+    batch: string;
+    location: string;
+    quantity: number;
+    uom_code?: string;
+    reason: string;
+  }) =>
+    request<{ quarantined: boolean }>("/stock/quarantine/", { method: "POST", body }),
+  returnToSupplier: (body: {
+    batch: string;
+    location: string;
+    quantity: number;
+    uom_code?: string;
+    reason: string;
+    status?: string;
+  }) =>
+    request<{ returned: boolean }>("/stock/supplier-return/", { method: "POST", body }),
+  recallBatch: (body: { batch: string; reason: string; authority_reference?: string }) =>
+    request<{
+      reference: string;
+      quantity_base: number;
+      locations: number;
+      trace: BatchTrace;
+    }>("/stock/recall/", { method: "POST", body }),
+  releaseBatch: (body: { batch: string; location: string; reason: string }) =>
+    request<{ released: boolean }>("/batches/release/", { method: "POST", body }),
+  batchTrace: (id: string) => request<BatchTrace>(`/batches/${id}/trace/`),
+  returnSaleLine: (body: {
+    sale_line: string;
+    quantity: number;
+    uom_code?: string;
+    reason: string;
+    restock: boolean;
+  }) => request<{ returned: boolean }>("/sales/returns/", { method: "POST", body }),
+
+  /* -- catalogue admin ------------------------------------------------- */
+
+  manufacturers: () => request<Paginated<Manufacturer>>("/manufacturers/"),
+  saveManufacturer: (body: Partial<Manufacturer>, id?: string) =>
+    request<Manufacturer>(id ? `/manufacturers/${id}/` : "/manufacturers/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+  categories: () => request<Paginated<Category>>("/categories/"),
+  saveCategory: (body: { name: string }, id?: string) =>
+    request<Category>(id ? `/categories/${id}/` : "/categories/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+
+  /* -- patients and prescriptions -------------------------------------- */
+
+  patients: (search = "") =>
+    request<Paginated<Patient>>(`/patients/?search=${encodeURIComponent(search)}`),
+  savePatient: (body: Partial<Patient>, id?: string) =>
+    request<Patient>(id ? `/patients/${id}/` : "/patients/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+  recordAllergy: (body: {
+    patient: string;
+    allergen: string;
+    severity: string;
+    note?: string;
+  }) => request<PatientAllergy>("/allergies/", { method: "POST", body }),
+  prescribers: () => request<Paginated<Prescriber>>("/prescribers/"),
+  savePrescriber: (body: Partial<Prescriber>, id?: string) =>
+    request<Prescriber>(id ? `/prescribers/${id}/` : "/prescribers/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+  prescriptions: () => request<Paginated<Prescription>>("/prescriptions/"),
+  createPrescription: (body: {
+    patient: string;
+    prescriber?: string | null;
+    issued_on?: string | null;
+    number?: string;
+  }) => request<Prescription>("/prescriptions/", { method: "POST", body }),
+  verifyPrescription: (id: string) =>
+    request<Prescription>(`/prescriptions/${id}/verify/`, { method: "POST", body: {} }),
+
+  /* -- thresholds and rules -------------------------------------------- */
+
+  alertRules: () => request<Paginated<AlertRule>>("/alert-rules/"),
+  saveAlertRule: (body: Partial<AlertRule>, id?: string) =>
+    request<AlertRule>(id ? `/alert-rules/${id}/` : "/alert-rules/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+  controlledQuotas: () => request<Paginated<ControlledQuota>>("/controlled-quotas/"),
+  saveControlledQuota: (body: Partial<ControlledQuota>, id?: string) =>
+    request<ControlledQuota>(
+      id ? `/controlled-quotas/${id}/` : "/controlled-quotas/",
+      { method: id ? "PATCH" : "POST", body },
+    ),
+  taxRules: () => request<Paginated<TaxRule>>("/tax-rules/"),
+  saveTaxRule: (body: Partial<TaxRule>, id?: string) =>
+    request<TaxRule>(id ? `/tax-rules/${id}/` : "/tax-rules/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+
+  /* -- fulfilment ------------------------------------------------------ */
+
+  prepareOrder: (id: string) =>
+    request<PurchaseOrder>(`/purchase-orders/${id}/prepare/`, {
+      method: "POST",
+      body: {},
+    }),
   recordWriteOff: (body: {
     batch: string;
     location: string;

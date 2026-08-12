@@ -10,6 +10,7 @@ import clsx from "clsx";
 import {
   ArrowLeftRight,
   Bell,
+  Building2,
   ChartNoAxesCombined,
   ClipboardList,
   FileText,
@@ -45,7 +46,9 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
     operations.push({ id: "pos", label: "Point of sale", icon: Receipt });
   }
   operations.push({ id: "transfers", label: "Transfers", icon: ArrowLeftRight });
-  if (can("DISTRIBUTE")) {
+  // A depot's fulfilment queue. Gated on publishing rather than on
+  // DISTRIBUTE: if you can offer stock you have orders to pick.
+  if (can("PUBLISH_LISTINGS")) {
     operations.push({ id: "distribution", label: "Distribution", icon: Truck });
   }
 
@@ -58,6 +61,9 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   // placed; it does not clear a consignment through customs.
   if (can("PUBLISH_LISTINGS")) {
     commerce.push({ id: "import", label: "Import receipt", icon: PackagePlus });
+    // Admission to the network is an act one organization performs on
+    // another, so it sits with the depot's other commercial work.
+    commerce.push({ id: "pharmacies", label: "Pharmacies", icon: Building2 });
   }
 
   const groups: NavGroup[] = [
@@ -72,6 +78,11 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
       items: [{ id: "prescriptions", label: "Prescriptions", icon: ClipboardList }],
     });
   }
+
+  groups.push({
+    label: "Configuration",
+    items: [{ id: "settings", label: "Settings", icon: Settings }],
+  });
 
   groups.push({
     label: "Reporting",
@@ -198,14 +209,6 @@ function Sidebar({
         </div>
       ))}
 
-      <div className="mx-3 my-3 border-t border-border" />
-      <button
-        type="button"
-        className="flex h-9 w-full items-center gap-2 border-l-2 border-transparent px-3 text-body text-text-2 transition-colors hover:bg-hover hover:text-text"
-      >
-        <Settings size={17} strokeWidth={1.8} />
-        Settings
-      </button>
     </nav>
   );
 }

@@ -8,10 +8,16 @@ import { EmptyState } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { api, logout, tokens } from "@/lib/api";
 import { PerformanceScreen } from "@/modules/analytics/PerformanceScreen";
+import { DistributionScreen } from "@/modules/distribution/DistributionScreen";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
 import { DocumentsScreen } from "@/modules/documents/DocumentsScreen";
 import { FinanceScreen } from "@/modules/finance/FinanceScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
+import { OverviewScreen } from "@/modules/overview/OverviewScreen";
+import { PharmaciesScreen } from "@/modules/pharmacies/PharmaciesScreen";
+import { PrescriptionsScreen } from "@/modules/prescriptions/PrescriptionsScreen";
+import { SettingsScreen } from "@/modules/settings/SettingsScreen";
+import { TransfersScreen } from "@/modules/transfers/TransfersScreen";
 import { MarketplaceScreen } from "@/modules/marketplace/MarketplaceScreen";
 import { OrdersScreen } from "@/modules/orders/OrdersScreen";
 import { PosScreen } from "@/modules/pos/PosScreen";
@@ -21,7 +27,7 @@ import { ReceivingScreen } from "@/modules/receiving/ReceivingScreen";
 export default function App() {
   const queryClient = useQueryClient();
   const [signedIn, setSignedIn] = useState(() => Boolean(tokens.access));
-  const [active, setActive] = useState("inventory");
+  const [active, setActive] = useState("overview");
 
   const me = useQuery({
     queryKey: ["me"],
@@ -92,7 +98,13 @@ export default function App() {
       {/* Keyed so a failing screen resets when the user navigates away,
           rather than staying broken until reload. */}
       <ErrorBoundary key={active}>
-        {active === "inventory" ? (
+        {active === "overview" ? (
+          <OverviewScreen
+            canSupply={canSupply}
+            canSell={canSell}
+            onNavigate={setActive}
+          />
+        ) : active === "inventory" ? (
           <InventoryScreen />
         ) : active === "pos" && canSell ? (
           <PosScreen locationId={mainLocation ?? null} />
@@ -114,6 +126,19 @@ export default function App() {
           <FinanceScreen />
         ) : active === "documents" ? (
           <DocumentsScreen />
+        ) : active === "distribution" && canSupply ? (
+          <DistributionScreen
+            locationId={mainLocation ?? null}
+            organizationId={me.data?.organization?.id}
+          />
+        ) : active === "transfers" ? (
+          <TransfersScreen />
+        ) : active === "prescriptions" && canSell ? (
+          <PrescriptionsScreen />
+        ) : active === "pharmacies" && canSupply ? (
+          <PharmaciesScreen />
+        ) : active === "settings" ? (
+          <SettingsScreen />
         ) : (
           <EmptyState
             heading="Not built yet"

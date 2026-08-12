@@ -326,6 +326,19 @@ class PurchaseOrderViewSet(
         return Response(PurchaseOrderSerializer(order).data)
 
     @action(detail=True, methods=["post"])
+    def prepare(self, request, pk=None):
+        """The depot starts picking. Visible to the buyer as tracking.
+
+        A separate step from confirming on purpose: "accepted" and "being
+        picked" are different answers to "where is my order", and
+        collapsing them hides the wait that actually matters.
+        """
+        order = services.start_preparation(
+            order=self.get_object(), performed_by=request.user
+        )
+        return Response(PurchaseOrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"])
     def confirm(self, request, pk=None):
         """Supplier accepts. Only the supplier may.
 
