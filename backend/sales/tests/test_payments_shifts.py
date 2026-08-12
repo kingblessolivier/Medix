@@ -5,7 +5,7 @@ resolves out of band, and a mock that settled instantly would hide every
 bug in it.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 from django.utils import timezone
@@ -13,13 +13,13 @@ from django.utils import timezone
 from catalog.models import LegalStatus
 from core.models import Branch, User
 from core.quantity import Quantity
-from fiscal.models import FiscalRecord, FiscalStatus
+from fiscal.models import FiscalStatus
 from fiscal.services import FiscalIntegrationService, exceptions_for
 from inventory import services as inventory
 from inventory.models import MovementKind
 from inventory.tests.factories import make_batch, make_location, make_org, make_product, uom
 from sales import payments, services, shifts
-from sales.models import PaymentMethod, PaymentStatus, SaleStatus, Shift, ShiftStatus, Till
+from sales.models import PaymentMethod, PaymentStatus, SaleStatus, ShiftStatus, Till
 
 pytestmark = pytest.mark.django_db
 

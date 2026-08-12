@@ -7,11 +7,14 @@ from rest_framework import serializers
 from sales.models import (
     ControlledDeliveryEntry,
     Patient,
+    PatientAllergy,
+    Prescriber,
     Payment,
     Prescription,
     Sale,
     SaleLine,
     Shift,
+    TaxRule,
     Till,
 )
 
@@ -144,10 +147,59 @@ class TakePaymentSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
 
 
+class PatientAllergySerializer(serializers.ModelSerializer):
+    """Recorded against the ingredient, never a brand.
+
+    A patient allergic to amoxicillin is allergic to it under every trade
+    name, so matching on brand would miss the same drug sold as something
+    else.
+    """
+
+    severity_label = serializers.CharField(source="get_severity_display", read_only=True)
+
+    class Meta:
+        model = PatientAllergy
+        fields = [
+            "id",
+            "patient",
+            "allergen",
+            "severity",
+            "severity_label",
+            "note",
+            "recorded_on",
+        ]
+
+
 class PatientSerializer(serializers.ModelSerializer):
+    """Sensitive personal data under Law 058/2021. Reads are audited.
+
+    `date_of_birth` and `sex` are optional and absent means **not
+    known**, never not applicable — a demographic check that cannot run
+    reports that it could not, rather than passing.
+    """
+
+    allergies = PatientAllergySerializer(many=True, read_only=True)
+    age_years = serializers.SerializerMethodField()
+
     class Meta:
         model = Patient
-        fields = ["id", "full_name", "address", "phone"]
+        fields = [
+            "id",
+            "full_name",
+            "address",
+            "phone",
+            "national_id",
+            "date_of_birth",
+            "age_years",
+            "sex",
+            "is_pregnant",
+            "consent_given_at",
+            "consent_purpose",
+            "allergies",
+        ]
+
+    def get_age_years(self, patient) -> int | None:
+        return patient.age_years()
 
 
 class PrescriptionSerializer(serializers.ModelSerializer):
@@ -168,12 +220,6 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             "verified_at",
             "verified_by_council_number",
         ]
-
-
-class TillSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Till
-        fields = ["id", "name", "code", "branch", "is_active"]
 
 
 class ShiftSerializer(serializers.ModelSerializer):
@@ -237,3 +283,57 @@ class ControlledEntrySerializer(serializers.ModelSerializer):
 
     def get_dispensed_by_name(self, obj) -> str:
         return str(obj.dispensed_by)
+
+
+
+
+class PrescriberSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Prescriber
+        fields = ["id", "full_name", "council_number", "facility"]
+
+
+class TillSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Till
+        fields = ["id", "name", "code", "branch", "is_active"]
+
+
+class TaxRuleSerializer(serializers.ModelSerializer):
+    """Effective-dated. Superseded, never edited in place.
+
+    A sale from last year must stay explainable under last year's rate,
+    so changing a rule means closing it and opening the next one.
+    """
+
+    class Meta:
+        model = TaxRule
+        fields = [
+            "id",
+            "treatment",
+            "rate_basis_points",
+            "effective_from",
+            "effective_to",
+        ]
+
+
+class CreatePrescriptionSerializer(serializers.Serializer):
+    patient = serializers.UUIDField()
+    prescriber = serializers.UUIDField(required=False, allow_null=True)
+    issued_on = serializers.DateField(required=False, allow_null=True)
+    number = serializers.CharField(max_length=60, required=False, allow_blank=True)
+
+
+class SaleReturnSerializer(serializers.Serializer):
+    """A customer bringing goods back.
+
+    `restock` is required rather than defaulted: medicine that has left
+    the premises may not be resaleable, and putting it back because the
+    software assumed so is how an unsafe pack re-enters supply.
+    """
+
+    sale_line = serializers.UUIDField()
+    quantity = serializers.IntegerField(min_value=1)
+    uom_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    reason = serializers.CharField(max_length=500)
+    restock = serializers.BooleanField()

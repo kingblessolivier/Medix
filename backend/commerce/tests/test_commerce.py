@@ -18,7 +18,6 @@ from commerce.models import (
     PurchaseOrderStatus,
     ShipmentStatus,
     TradingRelationship,
-    VendorListing,
 )
 from core.capabilities import Capability, capabilities_of, has_capability, require_capability
 from core.exceptions import LicenceInvalid

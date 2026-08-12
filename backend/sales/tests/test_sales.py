@@ -9,7 +9,6 @@ is tested from the refusing side as well as the passing one.
 from datetime import date, timedelta
 
 import pytest
-from django.utils import timezone
 
 from catalog.models import LegalStatus, TaxTreatment
 from core.exceptions import PrescriptionRequired, RegistrationInvalid

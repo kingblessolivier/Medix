@@ -6,22 +6,39 @@ logic. Every queryset uses tenant_objects — never objects.
 
 from __future__ import annotations
 
+from django.db.models import Count
 from django_filters import rest_framework as filters
 from rest_framework import viewsets
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from catalog.gs1 import GS1ParseError
-from catalog.models import Category, Product, ProductType
+from catalog import services as catalog_services
+from catalog.models import (
+    Category,
+    ClinicalAttribute,
+    Manufacturer,
+    Product,
+    ProductImage,
+    ProductRegistration,
+    ProductType,
+    UnitOfMeasure,
+)
 from catalog.serializers import (
     CategorySerializer,
+    ClinicalAttributeSerializer,
+    ManufacturerSerializer,
     ProductDetailSerializer,
+    ProductImageSerializer,
     ProductListSerializer,
+    ProductRegistrationSerializer,
     ProductTypeSerializer,
     ProductWriteSerializer,
     ScanInputSerializer,
     ScanResultSerializer,
+    UnitOfMeasureWriteSerializer,
 )
 from catalog.services import resolve_scan
 from core.exceptions import DomainError
@@ -66,18 +83,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer.save(modified_by=self.request.user)
 
 
-class ProductTypeViewSet(viewsets.ReadOnlyModelViewSet):
-    serializer_class = ProductTypeSerializer
-
-    def get_queryset(self):
-        return ProductType.tenant_objects.prefetch_related("attributes").all()
 
 
-class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
-    serializer_class = CategorySerializer
-
-    def get_queryset(self):
-        return Category.tenant_objects.all()
 
 
 class ScanView(APIView):
@@ -99,3 +106,182 @@ class ScanView(APIView):
             raise DomainError(str(exc), code="invalid_barcode")
 
         return Response(ScanResultSerializer(result).data)
+
+
+class ManufacturerViewSet(viewsets.ModelViewSet):
+    """Who makes what, and whether they are GMP certified."""
+
+    serializer_class = ManufacturerSerializer
+    filter_backends = [filters.DjangoFilterBackend]
+    filterset_fields = ["gmp_certified", "country_of_origin", "is_active"]
+
+    def get_queryset(self):
+        return Manufacturer.tenant_objects.annotate(
+            product_count=Count("products")
+        ).order_by("name")
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+    def perform_destroy(self, instance):
+        """Deactivated, not deleted.
+
+        Products point at it with PROTECT, and a manufacturer that made
+        stock still on a shelf must remain nameable. Deactivating keeps
+        the record and takes it out of the pickers.
+        """
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "modified_at"])
+
+
+class ProductTypeViewSet(viewsets.ModelViewSet):
+    serializer_class = ProductTypeSerializer
+
+    def get_queryset(self):
+        return ProductType.tenant_objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+
+class CategoryViewSet(viewsets.ModelViewSet):
+    """Therapeutic classification. A pharmacy adds its own."""
+
+    serializer_class = CategorySerializer
+
+    def get_queryset(self):
+        return Category.tenant_objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+    def perform_destroy(self, instance):
+        if instance.products.exists():
+            raise DomainError(
+                f"{instance.name} still has products.", code="category_in_use"
+            )
+        instance.delete()
+
+
+class UnitOfMeasureViewSet(viewsets.ModelViewSet):
+    """The packaging chain — carton, pack, blister, unit.
+
+    Validated as a whole after every write. A chain with two base units
+    or two levels sharing a factor would corrupt every quantity stored
+    against the product, and the failure would be silent.
+    """
+
+    serializer_class = UnitOfMeasureWriteSerializer
+
+    def get_queryset(self):
+        queryset = UnitOfMeasure.tenant_objects.select_related("product")
+        product = self.request.query_params.get("product")
+        if product:
+            queryset = queryset.filter(product_id=product)
+        return queryset.order_by("-factor_to_base")
+
+    def perform_create(self, serializer):
+        unit = serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+        catalog_services.validate_uom_chain(unit.product)
+
+    def perform_update(self, serializer):
+        unit = serializer.save()
+        catalog_services.validate_uom_chain(unit.product)
+
+    def perform_destroy(self, instance):
+        if instance.is_base:
+            raise DomainError(
+                "The base unit cannot be removed — every quantity is stored in it.",
+                code="base_uom_required",
+            )
+        product = instance.product
+        instance.delete()
+        catalog_services.validate_uom_chain(product)
+
+
+class ProductImageViewSet(viewsets.ModelViewSet):
+    """Pack photography. Verification, not decoration."""
+
+    serializer_class = ProductImageSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_queryset(self):
+        queryset = ProductImage.tenant_objects.select_related("product")
+        product = self.request.query_params.get("product")
+        if product:
+            queryset = queryset.filter(product_id=product)
+        return queryset
+
+    def perform_create(self, serializer):
+        image = serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+        self._enforce_single_primary(image)
+
+    def perform_update(self, serializer):
+        self._enforce_single_primary(serializer.save())
+
+    def _enforce_single_primary(self, image):
+        """Exactly one primary per product, enforced by demoting the rest.
+
+        A unique constraint alone would make setting a new primary a
+        two-step dance the client has to get right; doing it here means
+        the last write wins, which is what the person clicking expects.
+        """
+        if not image.is_primary:
+            return
+        ProductImage.objects.filter(product=image.product, is_primary=True).exclude(
+            pk=image.pk
+        ).update(is_primary=False)
+
+
+class ProductRegistrationViewSet(viewsets.ModelViewSet):
+    """Rwanda FDA registration. Expiry blocks listing and dispensing."""
+
+    serializer_class = ProductRegistrationSerializer
+
+    def get_queryset(self):
+        queryset = ProductRegistration.tenant_objects.select_related("product")
+        product = self.request.query_params.get("product")
+        if product:
+            queryset = queryset.filter(product_id=product)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+
+class ClinicalAttributeViewSet(viewsets.ModelViewSet):
+    """Sourced, effective-dated clinical facts.
+
+    Superseding rather than editing is the intended workflow: close the
+    current row with `effective_to` and add a new one. Editing in place
+    would rewrite what applied when a past dispensing happened.
+    """
+
+    serializer_class = ClinicalAttributeSerializer
+
+    def get_queryset(self):
+        queryset = ClinicalAttribute.tenant_objects.select_related("product")
+        product = self.request.query_params.get("product")
+        kind = self.request.query_params.get("kind")
+        if product:
+            queryset = queryset.filter(product_id=product)
+        if kind:
+            queryset = queryset.filter(kind=kind)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )

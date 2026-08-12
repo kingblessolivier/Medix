@@ -19,6 +19,7 @@ from rest_framework.views import APIView
 from catalog import services as catalog_services
 from catalog.models import Product, UnitOfMeasure
 from commerce import payloads, services
+from core import audit
 from commerce.models import (
     Availability,
     GoodsReceipt,
@@ -161,9 +162,29 @@ class ListingViewSet(
     mixins.CreateModelMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     """A vendor's own listings. Publishing needs a wholesale licence."""
+
+    def perform_destroy(self, instance):
+        """Unpublished, not deleted.
+
+        Orders point at the listing's product and the allocation figures
+        explain past commitments, so the row stays and leaves the
+        marketplace. A depot withdrawing an offer has not erased that it
+        ever made it.
+        """
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "modified_at"])
+        audit.record(
+            action="commerce.listing.withdrawn",
+            subject=instance,
+            actor=self.request.user,
+            after={"product": instance.product.name},
+            organization=self.request.user.organization,
+        )
 
     serializer_class = MarketplaceRowSerializer
 
@@ -618,6 +639,9 @@ class GoodsReceiptViewSet(
 class TradingRelationshipViewSet(
     mixins.CreateModelMixin,
     mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     """A supplier's approved customers."""
@@ -629,6 +653,23 @@ class TradingRelationshipViewSet(
 
     def perform_create(self, serializer):
         serializer.save(organization=self.request.user.organization, created_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        """Suspended, not deleted.
+
+        Orders and invoices reference the customer, and a depot that
+        stops supplying a pharmacy has not unmade the trade it already
+        did with them. Deactivating stops new orders; the history stays.
+        """
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "modified_at"])
+        audit.record(
+            action="commerce.customer.suspended",
+            subject=instance,
+            actor=self.request.user,
+            after={"customer": instance.customer.name},
+            organization=self.request.user.organization,
+        )
 
 
 class CapabilityView(APIView):

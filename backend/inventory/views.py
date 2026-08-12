@@ -11,6 +11,7 @@ from django_filters import rest_framework as filters
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -18,7 +19,7 @@ from catalog.models import Product, UnitOfMeasure
 from core.exceptions import DomainError
 from core.pagination import LedgerCursorPagination
 from core.quantity import Quantity
-from inventory import services
+from inventory import movements, services
 from inventory.models import (
     Batch,
     Location,
@@ -36,6 +37,10 @@ from inventory.serializers import (
     ReceiptInputSerializer,
     StockBalanceSerializer,
     StockMovementSerializer,
+    QuarantineSerializer,
+    RecallSerializer,
+    SupplierReturnSerializer,
+    TransferSerializer,
 )
 
 
@@ -230,4 +235,134 @@ class AdjustStockView(APIView):
         return Response(
             StockMovementSerializer(result.movement).data,
             status=status.HTTP_200_OK if result.replayed else status.HTTP_201_CREATED,
+        )
+
+
+def _uom_for(batch, code: str):
+    """The unit a quantity was entered in, defaulting to the base."""
+    if not code:
+        return batch.product.base_uom
+    from catalog.models import UnitOfMeasure
+
+    try:
+        return UnitOfMeasure.objects.get(product=batch.product, code=code)
+    except UnitOfMeasure.DoesNotExist:
+        raise DomainError(
+            f"{batch.product.name} has no unit '{code}'.", code="unknown_uom"
+        )
+
+
+class StockActionView(APIView):
+    """The ledger movements that had a kind and no way to happen.
+
+    Transfer, quarantine, supplier return and recall. Each one posts
+    through `inventory.services.post_movement` — there is no path here
+    that writes a balance.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, action: str):
+        handlers = {
+            "transfer": self._transfer,
+            "quarantine": self._quarantine,
+            "supplier-return": self._supplier_return,
+            "recall": self._recall,
+        }
+        handler = handlers.get(action)
+        if handler is None:
+            raise DomainError(f"Unknown stock action '{action}'.", code="unknown_action")
+        return handler(request)
+
+    def _transfer(self, request):
+        payload = TransferSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        batch = get_object_or_404(Batch.tenant_objects, pk=data["batch"])
+        result = movements.transfer(
+            organization=request.user.organization,
+            batch=batch,
+            from_location=get_object_or_404(
+                Location.tenant_objects, pk=data["from_location"]
+            ),
+            to_location=get_object_or_404(
+                Location.tenant_objects, pk=data["to_location"]
+            ),
+            quantity=Quantity(
+                data["quantity"], _uom_for(batch, data.get("uom_code", ""))
+            ),
+            performed_by=request.user,
+            reason=data.get("reason", ""),
+            idempotency_key=request.headers.get("Idempotency-Key"),
+        )
+        return Response({"reference": result["reference"]}, status=status.HTTP_201_CREATED)
+
+    def _quarantine(self, request):
+        payload = QuarantineSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        batch = get_object_or_404(Batch.tenant_objects, pk=data["batch"])
+        movements.quarantine(
+            organization=request.user.organization,
+            batch=batch,
+            location=get_object_or_404(Location.tenant_objects, pk=data["location"]),
+            quantity=Quantity(
+                data["quantity"], _uom_for(batch, data.get("uom_code", ""))
+            ),
+            performed_by=request.user,
+            reason=data["reason"],
+        )
+        return Response({"quarantined": True}, status=status.HTTP_201_CREATED)
+
+    def _supplier_return(self, request):
+        payload = SupplierReturnSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        batch = get_object_or_404(Batch.tenant_objects, pk=data["batch"])
+        movements.supplier_return(
+            organization=request.user.organization,
+            batch=batch,
+            location=get_object_or_404(Location.tenant_objects, pk=data["location"]),
+            quantity=Quantity(
+                data["quantity"], _uom_for(batch, data.get("uom_code", ""))
+            ),
+            performed_by=request.user,
+            reason=data["reason"],
+            status=data.get("status") or StockStatus.AVAILABLE,
+        )
+        return Response({"returned": True}, status=status.HTTP_201_CREATED)
+
+    def _recall(self, request):
+        payload = RecallSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        result = movements.recall(
+            organization=request.user.organization,
+            batch=get_object_or_404(Batch.tenant_objects, pk=data["batch"]),
+            performed_by=request.user,
+            reason=data["reason"],
+            authority_reference=data.get("authority_reference", ""),
+        )
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class BatchTraceView(APIView):
+    """Everywhere a batch went — the question a recall actually asks.
+
+    Readable before a recall as well as after: deciding whether to recall
+    means knowing how far the batch travelled.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, batch_id):
+        return Response(
+            movements.trace_batch(
+                organization=request.user.organization,
+                batch=get_object_or_404(Batch.tenant_objects, pk=batch_id),
+            )
         )

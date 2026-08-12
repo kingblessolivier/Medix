@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from django.db import models
 
-from catalog.models import Product, UnitOfMeasure
-from core.models import BaseModel, TenantModel, uuid7
+from catalog.models import Product
+from core.models import BaseModel, TenantModel
 
 
 class TemperatureClass(models.TextChoices):

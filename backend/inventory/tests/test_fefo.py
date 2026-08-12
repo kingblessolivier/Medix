@@ -4,7 +4,6 @@ Getting this wrong does not throw. It silently generates expiry
 write-offs, discovered months later as loss.
 """
 
-from datetime import date, timedelta
 
 import pytest
 

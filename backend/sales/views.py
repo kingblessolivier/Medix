@@ -7,15 +7,20 @@ agent sync endpoint, a management command, or a Celery task.
 
 from __future__ import annotations
 
+from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.filters import SearchFilter
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from catalog.models import Product, UnitOfMeasure
+from core import audit
 from core.exceptions import DomainError
 from core.models import User
+from core.quantity import Quantity
 from fiscal.models import FiscalRecord
 from fiscal.services import FiscalIntegrationService, exceptions_for
 from inventory.models import Batch, Location
@@ -24,8 +29,13 @@ from core.alerts import summarise
 from sales import services, shifts as shift_services
 from sales.models import (
     ControlledDeliveryEntry,
+    Patient,
+    PatientAllergy,
+    Prescriber,
     Prescription,
     Sale,
+    SaleLine,
+    TaxRule,
     SaleStatus,
     Shift,
     ShiftStatus,
@@ -33,6 +43,12 @@ from sales.models import (
 )
 from sales.serializers import (
     AddLineSerializer,
+    CreatePrescriptionSerializer,
+    PatientAllergySerializer,
+    PatientSerializer,
+    PrescriberSerializer,
+    SaleReturnSerializer,
+    TaxRuleSerializer,
     CloseShiftSerializer,
     CompleteSaleSerializer,
     ControlledEntrySerializer,
@@ -225,11 +241,50 @@ class SaleViewSet(
         return Response(SaleSerializer(sale).data)
 
 
-class PrescriptionViewSet(viewsets.ReadOnlyModelViewSet):
+class PrescriptionViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
     serializer_class = PrescriptionSerializer
 
     def get_queryset(self):
         return Prescription.tenant_objects.select_related("patient", "prescriber").all()
+
+    def create(self, request):
+        """Raised at the counter, pending verification.
+
+        Created PENDING and stays there: only a registered pharmacist
+        moves it, through `verify`. OCR may fill the extract, and it
+        never authorizes.
+        """
+        payload = CreatePrescriptionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        prescription = Prescription.objects.create(
+            organization=request.user.organization,
+            patient=get_object_or_404(Patient.tenant_objects, pk=data["patient"]),
+            prescriber=(
+                get_object_or_404(Prescriber.tenant_objects, pk=data["prescriber"])
+                if data.get("prescriber")
+                else None
+            ),
+            issued_on=data.get("issued_on"),
+            number=data.get("number", ""),
+            created_by=request.user,
+        )
+        audit.record(
+            action="sales.prescription.raised",
+            subject=prescription,
+            actor=request.user,
+            after={"patient": prescription.patient.full_name},
+            organization=request.user.organization,
+        )
+        return Response(
+            PrescriptionSerializer(prescription).data, status=status.HTTP_201_CREATED
+        )
 
     @action(detail=True, methods=["post"])
     def verify(self, request, pk=None):
@@ -239,13 +294,6 @@ class PrescriptionViewSet(viewsets.ReadOnlyModelViewSet):
             prescription=prescription, pharmacist=request.user
         )
         return Response(PrescriptionSerializer(verified).data)
-
-
-class TillViewSet(viewsets.ReadOnlyModelViewSet):
-    serializer_class = TillSerializer
-
-    def get_queryset(self):
-        return Till.tenant_objects.all()
 
 
 class ShiftViewSet(
@@ -352,3 +400,150 @@ class PaymentCallbackView(APIView):
 
         payment_services.resolve_payment(payment=payment, confirmed=confirmed)
         return Response({"status": "ok"})
+
+
+class PatientViewSet(viewsets.ModelViewSet):
+    """Sensitive personal data under Law 058/2021.
+
+    Every read of a patient record is written to the audit stream, not
+    just every write — `docs/16-security.md` treats access to health data
+    as the event worth recording.
+    """
+
+    serializer_class = PatientSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["full_name", "phone", "national_id"]
+
+    def get_queryset(self):
+        return Patient.tenant_objects.prefetch_related("allergies")
+
+    def perform_create(self, serializer):
+        patient = serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+        audit.record(
+            action="sales.patient.created",
+            subject=patient,
+            actor=self.request.user,
+            after={"full_name": patient.full_name},
+            organization=self.request.user.organization,
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        patient = self.get_object()
+        audit.record(
+            action="sales.patient.read",
+            subject=patient,
+            actor=request.user,
+            organization=request.user.organization,
+        )
+        return Response(self.get_serializer(patient).data)
+
+
+class PatientAllergyViewSet(viewsets.ModelViewSet):
+    """Recorded by a pharmacist, against an ingredient."""
+
+    serializer_class = PatientAllergySerializer
+
+    def get_queryset(self):
+        queryset = PatientAllergy.tenant_objects.select_related("patient")
+        patient = self.request.query_params.get("patient")
+        if patient:
+            queryset = queryset.filter(patient_id=patient)
+        return queryset
+
+    def perform_create(self, serializer):
+        allergy = serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+        audit.record(
+            action="sales.allergy.recorded",
+            subject=allergy.patient,
+            actor=self.request.user,
+            after={"allergen": allergy.allergen, "severity": allergy.severity},
+            organization=self.request.user.organization,
+        )
+
+
+class PrescriberViewSet(viewsets.ModelViewSet):
+    serializer_class = PrescriberSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["full_name", "council_number", "facility"]
+
+    def get_queryset(self):
+        return Prescriber.tenant_objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+
+class TillViewSet(viewsets.ModelViewSet):
+    serializer_class = TillSerializer
+
+    def get_queryset(self):
+        return Till.tenant_objects.all()
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+
+class TaxRuleViewSet(viewsets.ModelViewSet):
+    """Effective-dated. Superseded rather than edited.
+
+    Deleting a rule a sale was priced under would make that sale
+    unexplainable, so removal closes the rule with `effective_to`
+    instead.
+    """
+
+    serializer_class = TaxRuleSerializer
+
+    def get_queryset(self):
+        return TaxRule.tenant_objects.order_by("treatment", "-effective_from")
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+    def perform_destroy(self, instance):
+        instance.effective_to = timezone.localdate()
+        instance.save(update_fields=["effective_to", "modified_at"])
+
+
+class SaleReturnView(APIView):
+    """A customer bringing goods back.
+
+    `restock` is the caller's decision, never a default — see
+    `inventory.movements.sale_return`.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from inventory import movements
+
+        payload = SaleReturnSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        line = get_object_or_404(
+            SaleLine.objects.filter(sale__organization=request.user.organization),
+            pk=data["sale_line"],
+        )
+        code = data.get("uom_code") or ""
+        unit = (
+            line.product.units.get(code=code) if code else line.product.base_uom
+        )
+        movements.sale_return(
+            organization=request.user.organization,
+            sale_line=line,
+            quantity=Quantity(data["quantity"], unit),
+            performed_by=request.user,
+            reason=data["reason"],
+            restock=data["restock"],
+        )
+        return Response({"returned": True}, status=status.HTTP_201_CREATED)

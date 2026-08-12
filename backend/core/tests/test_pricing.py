@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import pytest
 
 from core.money import Money
-from core.pricing import DerivedPrice, NotSameProduct, cost_per_base, derive, price_list
+from core.pricing import NotSameProduct, cost_per_base, derive, price_list
 from core.quantity import compose
 
 

@@ -4,7 +4,6 @@ The replay test is the one that matters most: it catches an entire class
 of bug that no unit test of a single service will.
 """
 
-from datetime import timedelta
 
 import pytest
 from django.db.models import Sum

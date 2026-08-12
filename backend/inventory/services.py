@@ -32,7 +32,6 @@ from inventory.models import (
     StockBalance,
     StockMovement,
     StockStatus,
-    TemperatureClass,
 )
 
 # Movements that reduce stock. Used to validate sign against kind.

@@ -162,3 +162,43 @@ class AllocationSerializer(serializers.Serializer):
     batch_number = serializers.CharField()
     expiry_date = serializers.DateField()
     quantity_base = serializers.IntegerField()
+
+
+class TransferSerializer(serializers.Serializer):
+    """Stock between two locations of one organization."""
+
+    batch = serializers.UUIDField()
+    from_location = serializers.UUIDField()
+    to_location = serializers.UUIDField()
+    quantity = serializers.IntegerField(min_value=1)
+    uom_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    reason = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+
+class QuarantineSerializer(serializers.Serializer):
+    """A hold, not a removal. The reason is what makes it reviewable."""
+
+    batch = serializers.UUIDField()
+    location = serializers.UUIDField()
+    quantity = serializers.IntegerField(min_value=1)
+    uom_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    reason = serializers.CharField(max_length=500)
+
+
+class SupplierReturnSerializer(serializers.Serializer):
+    batch = serializers.UUIDField()
+    location = serializers.UUIDField()
+    quantity = serializers.IntegerField(min_value=1)
+    uom_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    reason = serializers.CharField(max_length=500)
+    #: Usually QUARANTINED — the common case is sending back something
+    #: that was held on arrival.
+    status = serializers.CharField(max_length=12, required=False, allow_blank=True)
+
+
+class RecallSerializer(serializers.Serializer):
+    batch = serializers.UUIDField()
+    reason = serializers.CharField(max_length=500)
+    authority_reference = serializers.CharField(
+        max_length=60, required=False, allow_blank=True
+    )

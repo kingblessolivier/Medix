@@ -15,4 +15,15 @@ urlpatterns = [
     path("allocations/preview/", views.AllocationPreviewView.as_view(), name="allocation-preview"),
     path("stock/receive/", views.ReceiveStockView.as_view(), name="stock-receive"),
     path("stock/adjust/", views.AdjustStockView.as_view(), name="stock-adjust"),
+    # transfer · quarantine · supplier-return · recall
+    path(
+        "stock/<slug:action>/",
+        views.StockActionView.as_view(),
+        name="stock-action",
+    ),
+    path(
+        "batches/<uuid:batch_id>/trace/",
+        views.BatchTraceView.as_view(),
+        name="batch-trace",
+    ),
 ] + router.urls

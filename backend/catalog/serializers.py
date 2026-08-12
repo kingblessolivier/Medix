@@ -7,7 +7,10 @@ from rest_framework import serializers
 from catalog.models import (
     AttributeDefinition,
     Category,
+    ClinicalAttribute,
+    Manufacturer,
     Product,
+    ProductImage,
     ProductRegistration,
     ProductType,
     UnitOfMeasure,
@@ -199,3 +202,91 @@ class ScanResultSerializer(serializers.Serializer):
             "batch_number": batch.batch_number,
             "expiry_date": batch.expiry_date,
         }
+
+
+class ManufacturerSerializer(serializers.ModelSerializer):
+    """Who made it, and where.
+
+    `gmp_certified` is a purchasing fact, not a label — a depot may be
+    barred from importing from an uncertified site — so it is filterable
+    rather than buried in a note.
+    """
+
+    product_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Manufacturer
+        fields = [
+            "id",
+            "name",
+            "country_of_origin",
+            "gmp_certified",
+            "gmp_expiry",
+            "is_active",
+            "product_count",
+        ]
+
+    def get_product_count(self, manufacturer) -> int:
+        return getattr(manufacturer, "product_count", 0)
+
+
+class UnitOfMeasureWriteSerializer(serializers.ModelSerializer):
+    """One rung of a packaging chain.
+
+    Validated as a chain rather than a row — exactly one base at factor 1
+    and no two levels sharing a factor — because every ledger quantity is
+    stored in base units and a broken chain corrupts them silently.
+    """
+
+    class Meta:
+        model = UnitOfMeasure
+        fields = [
+            "id",
+            "product",
+            "code",
+            "name",
+            "factor_to_base",
+            "is_base",
+            "is_purchase_default",
+            "is_dispense_default",
+            "is_sellable",
+        ]
+
+
+class ProductImageSerializer(serializers.ModelSerializer):
+    """A picture of the actual pack.
+
+    `alt` is required, not optional: the image is how a buyer verifies the
+    presentation before committing to a carton, and a product whose image
+    a screen reader cannot describe is a product one buyer cannot check.
+    """
+
+    class Meta:
+        model = ProductImage
+        fields = ["id", "product", "image", "alt", "is_primary", "position"]
+
+
+class ClinicalAttributeSerializer(serializers.ModelSerializer):
+    """A sourced clinical fact, with the dates it applied.
+
+    `source` is required by a database constraint as well as here. A
+    clinical threshold with no cited origin is an opinion, and this system
+    does not hold opinions about medicines.
+    """
+
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+
+    class Meta:
+        model = ClinicalAttribute
+        fields = [
+            "id",
+            "product",
+            "kind",
+            "kind_label",
+            "value_number",
+            "value_text",
+            "source",
+            "source_reference",
+            "effective_from",
+            "effective_to",
+        ]
