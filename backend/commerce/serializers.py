@@ -47,10 +47,10 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
     brand = serializers.CharField(source="product.brand", read_only=True)
     dosage_form = serializers.SerializerMethodField()
 
-    # Read from the queryset annotation. A declared field with both
-    # read_only and a default makes DRF skip the attribute lookup
-    # entirely, which silently returned zero stock for every listing.
-    stock_base = serializers.SerializerMethodField()
+    # What the depot published, less what is already committed. Named
+    # `available_base` rather than `stock_base` because it is not the
+    # stock: a depot holding 500 packs may be offering 200.
+    available_base = serializers.IntegerField(read_only=True)
     earliest_expiry = serializers.SerializerMethodField()
 
     def get_dosage_form(self, listing) -> str:
@@ -85,37 +85,14 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
             "legal_status",
             "requires_prescription",
             "cold_chain",
-            "stock_base",
+            "available_base",
             "earliest_expiry",
         ]
 
     vendor = serializers.UUIDField(source="organization_id", read_only=True)
 
-    def get_stock_base(self, obj) -> int:
-        """Zero when the queryset did not annotate it — a vendor's own
-        listing view does not need the number."""
-        return getattr(obj, "stock_base", 0) or 0
-
     def get_earliest_expiry(self, obj):
         return getattr(obj, "earliest_expiry", None)
-
-
-class VendorComparisonSerializer(serializers.Serializer):
-    """Price against expiry, MOQ and lead time — the whole tradeoff.
-
-    The cheapest row is frequently the wrong choice, so every dimension a
-    buyer weighs is present.
-    """
-
-    listing_id = serializers.UUIDField()
-    vendor_name = serializers.CharField()
-    price = serializers.IntegerField()
-    uom = serializers.CharField()
-    availability = serializers.CharField()
-    stock_base = serializers.IntegerField()
-    earliest_expiry = serializers.DateField(allow_null=True)
-    moq = serializers.IntegerField()
-    lead_time_days = serializers.IntegerField()
 
 
 class PublishListingSerializer(serializers.Serializer):

@@ -36,11 +36,16 @@ class Availability(models.TextChoices):
 
 
 class VendorListing(TenantModel):
-    """What a wholesale pharmacy or importer offers.
+    """What a depot offers, and how much of it.
 
-    The product is shared; the listing belongs to the seller. Two vendors
-    listing the same product is the normal case, and comparing them is a
-    first-class screen.
+    A depot's holding and its offer are different numbers. A depot with
+    500 packs may publish 200 and keep the rest for its own branches or a
+    standing contract, so `offered_base` is an allocation out of stock,
+    not a view of it.
+
+    Publishing the true balance instead would also tell every customer —
+    and every competitor with an account — exactly what the depot holds.
+    The marketplace shows this figure, never the stock ledger.
     """
 
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="listings")
@@ -56,6 +61,13 @@ class VendorListing(TenantModel):
     lead_time_days = models.IntegerField(default=1)
     is_active = models.BooleanField(default=True)
 
+    #: Allocated to the public catalogue, in base units. Decremented when
+    #: goods are dispatched, so the offer shrinks as it is consumed.
+    offered_base = models.BigIntegerField(default=0)
+    #: Reserved by confirmed orders not yet shipped. Offered minus this is
+    #: what a new buyer can actually take.
+    committed_base = models.BigIntegerField(default=0)
+
     class Meta:
         db_table = "commerce_vendor_listing"
         ordering = ["price"]
@@ -65,6 +77,12 @@ class VendorListing(TenantModel):
             ),
             models.CheckConstraint(condition=models.Q(price__gte=0), name="ck_listing_price"),
             models.CheckConstraint(condition=models.Q(moq__gte=1), name="ck_listing_moq"),
+            models.CheckConstraint(
+                condition=models.Q(offered_base__gte=0), name="ck_listing_offered_nonneg"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(committed_base__gte=0), name="ck_listing_committed_nonneg"
+            ),
         ]
         indexes = [models.Index(fields=["product", "availability", "price"])]
 
@@ -75,6 +93,11 @@ class VendorListing(TenantModel):
     def is_orderable(self) -> bool:
         """Import-on-demand and not-in-country go through a request, not an order."""
         return self.availability in (Availability.AVAILABLE_NOW, Availability.INCOMING)
+
+    @property
+    def available_base(self) -> int:
+        """What a new order may take: offered, less what is already spoken for."""
+        return max(0, self.offered_base - self.committed_base)
 
 
 class TradingRelationship(TenantModel):
@@ -112,9 +135,20 @@ class TradingRelationship(TenantModel):
 
 
 class PurchaseOrderStatus(models.TextChoices):
+    """Two approvals, then the depot picks it.
+
+    The buyer's own approval comes first: a pharmacist raises the order
+    and an owner or manager releases it. Only then does the depot see it,
+    and the depot approves again before anything is picked. Collapsing
+    those into one "submitted" hides which side is holding the order up.
+    """
+
     DRAFT = "DRAFT", "Draft"
-    SUBMITTED = "SUBMITTED", "Submitted"
-    CONFIRMED = "CONFIRMED", "Confirmed"
+    PENDING_APPROVAL = "PENDING_APPROVAL", "Awaiting internal approval"
+    REJECTED = "REJECTED", "Rejected internally"
+    SUBMITTED = "SUBMITTED", "Sent to depot"
+    CONFIRMED = "CONFIRMED", "Approved by depot"
+    PREPARING = "PREPARING", "Being prepared"
     PARTIALLY_DISPATCHED = "PARTIALLY_DISPATCHED", "Partially dispatched"
     DISPATCHED = "DISPATCHED", "Dispatched"
     PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED", "Partially received"

@@ -279,21 +279,11 @@ export type MarketplaceRow = {
   legal_status: string;
   requires_prescription: boolean;
   cold_chain: boolean;
-  stock_base: number;
+  /** What the depot published, less what is committed. Not its stock. */
+  available_base: number;
   earliest_expiry: string | null;
 };
 
-export type VendorRow = {
-  listing_id: string;
-  vendor_name: string;
-  price: number;
-  uom: string;
-  availability: string;
-  stock_base: number;
-  earliest_expiry: string | null;
-  moq: number;
-  lead_time_days: number;
-};
 
 export type OrderLine = {
   id: string;
@@ -435,8 +425,6 @@ export const api = {
   capabilities: () => request<Capabilities>("/capabilities/"),
   marketplace: (params = "") =>
     request<Paginated<MarketplaceRow>>(`/marketplace/${params}`),
-  compareVendors: (product: string) =>
-    request<VendorRow[]>(`/marketplace/compare/?product=${product}`),
 
   orders: () => request<Paginated<PurchaseOrder>>("/purchase-orders/"),
   order: (id: string) => request<PurchaseOrder>(`/purchase-orders/${id}/`),

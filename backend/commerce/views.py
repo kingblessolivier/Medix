@@ -7,8 +7,7 @@ and every other resource here stays scoped as usual.
 
 from __future__ import annotations
 
-from django.db.models import BigIntegerField, OuterRef, Subquery, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 from django_filters import rest_framework as filters
 from rest_framework import mixins, status, viewsets
@@ -40,12 +39,11 @@ from commerce.serializers import (
     StartOrderSerializer,
     StartReceiptSerializer,
     TradingRelationshipSerializer,
-    VendorComparisonSerializer,
 )
 from core.exceptions import DomainError
 from core.models import Organization
 from inventory import services as inventory
-from inventory.models import Batch, Location, StockBalance, StockStatus
+from inventory.models import Batch, Location
 
 
 def _resolve_uom(product: Product, code: str) -> UnitOfMeasure:
@@ -94,24 +92,11 @@ class MarketplaceViewSet(viewsets.ReadOnlyModelViewSet):
             )
             .prefetch_related("product__units")
             .annotate(
-                # A buyer comparing vendors needs to know whether the
-                # seller actually holds the goods, and how long that stock
-                # has left. Annotated rather than computed per row so the
-                # list stays one query.
-                stock_base=Coalesce(
-                    Subquery(
-                        StockBalance.objects.filter(
-                            organization_id=OuterRef("organization_id"),
-                            product_id=OuterRef("product_id"),
-                            status=StockStatus.AVAILABLE,
-                        )
-                        .values("product_id")
-                        .annotate(total=Sum("quantity_base"))
-                        .values("total")[:1],
-                        output_field=BigIntegerField(),
-                    ),
-                    Value(0),
-                ),
+                # The buyer sees what the depot offered, less what is
+                # already committed — never the depot's true balance.
+                # Publishing the ledger would tell every customer, and
+                # every competitor holding an account, exactly what this
+                # depot is sitting on.
                 earliest_expiry=Subquery(
                     Batch.objects.filter(
                         organization_id=OuterRef("organization_id"),
@@ -133,31 +118,6 @@ class MarketplaceViewSet(viewsets.ReadOnlyModelViewSet):
         if search:
             qs = qs.filter(product__name__icontains=search)
         return qs
-
-    @action(detail=False, methods=["get"], url_path="compare")
-    def compare(self, request):
-        """Every vendor offering one product, cheapest first."""
-        product = get_object_or_404(Product.objects.all(), pk=request.query_params.get("product"))
-        rows = services.compare_vendors(product=product)
-        return Response(
-            VendorComparisonSerializer(
-                [
-                    {
-                        "listing_id": r["listing"].id,
-                        "vendor_name": r["vendor"].name,
-                        "price": r["price"],
-                        "uom": r["uom"],
-                        "availability": r["availability"],
-                        "stock_base": r["stock_base"],
-                        "earliest_expiry": r["earliest_expiry"],
-                        "moq": r["moq"],
-                        "lead_time_days": r["lead_time_days"],
-                    }
-                    for r in rows
-                ],
-                many=True,
-            ).data
-        )
 
 
 class ListingViewSet(

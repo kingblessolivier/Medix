@@ -60,6 +60,16 @@ class CustomerNotVerified(DomainError):
     default_detail = "This customer has not been verified."
 
 
+class InsufficientOffer(DomainError):
+    default_code = "insufficient_offer"
+    default_detail = "The depot has not offered that much."
+
+
+class NotApprover(DomainError):
+    default_code = "not_approver"
+    default_detail = "This order needs a different person to approve it."
+
+
 # --------------------------------------------------------------------------
 # Listings
 # --------------------------------------------------------------------------
@@ -75,77 +85,52 @@ def publish_listing(
     availability: str = Availability.AVAILABLE_NOW,
     moq: int = 1,
     lead_time_days: int = 1,
+    offered_base: int | None = None,
     performed_by: User | None = None,
 ) -> VendorListing:
-    """Offer a product for sale.
+    """Offer a product for sale, and say how much of it.
 
     Only a wholesale pharmacy or importer may publish. A retail pharmacy
     that acquires a wholesale licence gains this without any code change,
     and loses it again when that licence lapses.
+
+    `offered_base` is an allocation out of the depot's own stock, not a
+    view of it. A depot holding 500 packs may offer 200 and keep the rest
+    for its branches. Offering more than is held is refused: publishing a
+    quantity you cannot ship is how a buyer plans around stock that was
+    never there.
     """
     require_capability(organization, Capability.PUBLISH_LISTINGS)
+
+    if offered_base is not None:
+        if offered_base < 0:
+            raise DomainError("Offered quantity cannot be negative.", code="negative_offer")
+        on_hand = inventory.balance_for(organization=organization, product=product)
+        if offered_base > on_hand:
+            raise DomainError(
+                f"Cannot offer more than is held: {on_hand} in stock.",
+                code="offer_exceeds_stock",
+                meta={"on_hand": on_hand, "offered": offered_base},
+            )
+
+    defaults = {
+        "price": price,
+        "price_uom": price_uom,
+        "availability": availability,
+        "moq": moq,
+        "lead_time_days": lead_time_days,
+        "is_active": True,
+        "modified_by": performed_by,
+    }
+    if offered_base is not None:
+        defaults["offered_base"] = offered_base
 
     listing, _ = VendorListing.objects.update_or_create(
         organization=organization,
         product=product,
-        defaults={
-            "price": price,
-            "price_uom": price_uom,
-            "availability": availability,
-            "moq": moq,
-            "lead_time_days": lead_time_days,
-            "is_active": True,
-            "modified_by": performed_by,
-        },
+        defaults=defaults,
     )
     return listing
-
-
-def compare_vendors(*, product: Product, as_of: date | None = None):
-    """Every vendor offering a product, cheapest first.
-
-    The system makes the tradeoff visible — price against expiry, MOQ and
-    lead time — and does not choose. The cheapest listing is frequently
-    the wrong one.
-    """
-    as_of = as_of or timezone.localdate()
-    listings = (
-        VendorListing.objects.filter(product=product, is_active=True)
-        .select_related("organization", "price_uom")
-        .order_by("price")
-    )
-
-    rows = []
-    for listing in listings:
-        stock = (
-            inventory.balance_for(
-                organization=listing.organization, product=product
-            )
-            if listing.availability == Availability.AVAILABLE_NOW
-            else 0
-        )
-        earliest = (
-            Batch.objects.filter(
-                organization=listing.organization, product=product, expiry_date__gt=as_of
-            )
-            .order_by("expiry_date")
-            .values_list("expiry_date", flat=True)
-            .first()
-        )
-        rows.append(
-            {
-                "listing": listing,
-                "vendor": listing.organization,
-                "price": listing.price,
-                "uom": listing.price_uom.code,
-                "availability": listing.availability,
-                "stock_base": stock,
-                "earliest_expiry": earliest,
-                "moq": listing.moq,
-                "lead_time_days": listing.lead_time_days,
-            }
-        )
-    return rows
 
 
 # --------------------------------------------------------------------------
@@ -231,6 +216,17 @@ def add_order_line(
     # The minimum applies to the line the supplier ends up picking, not to
     # each click. Topping a line of 10 up by 5 leaves 15, which clears a
     # minimum of 10 — refusing that would be arithmetic, not policy.
+    # The offer is the ceiling, not the depot's shelf. A buyer may only
+    # take what was published and is not already spoken for.
+    resulting_base = ((line.quantity if line is not None else 0) + quantity) * listing.price_uom.factor_to_base
+    already = (line.quantity_base if line is not None else 0)
+    if resulting_base - already > listing.available_base:
+        raise InsufficientOffer(
+            f"{listing.product.name}: {listing.available_base // listing.price_uom.factor_to_base} "
+            f"{listing.price_uom.code.lower()} available.",
+            meta={"available_base": listing.available_base},
+        )
+
     resulting = (line.quantity if line is not None else 0) + quantity
     if resulting < listing.moq:
         raise BelowMinimum(
@@ -263,12 +259,88 @@ def _recalculate_order(order: PurchaseOrder) -> None:
 
 
 @transaction.atomic
-def submit_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
-    """Send to the supplier. The supplier must have verified the buyer."""
+def request_approval(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
+    """A pharmacist sends the order for internal release.
+
+    The order does not reach the depot yet. Someone in the buying pharmacy
+    with the authority to commit money has to release it first.
+    """
     if order.status != PurchaseOrderStatus.DRAFT:
-        raise DomainError("This order has been submitted.", code="order_not_draft")
+        raise DomainError("This order is no longer a draft.", code="order_not_draft")
+    if not order.lines.exists():
+        raise DomainError("Add a product first.", code="order_empty")
+
+    order.status = PurchaseOrderStatus.PENDING_APPROVAL
+    order.modified_by = performed_by
+    order.save(update_fields=["status", "modified_by", "modified_at"])
+    return order
+
+
+@transaction.atomic
+def reject_order(*, order: PurchaseOrder, performed_by: User, reason: str) -> PurchaseOrder:
+    """Send it back to the pharmacist, with a reason.
+
+    A rejection without a reason is an argument the raiser cannot answer,
+    so the reason is required rather than optional.
+    """
+    if order.status != PurchaseOrderStatus.PENDING_APPROVAL:
+        raise DomainError("This order is not awaiting approval.", code="order_not_pending")
+    if not reason.strip():
+        raise DomainError("Give a reason for the rejection.", code="reason_required")
+    _assert_internal_approver(order, performed_by)
+
+    order.status = PurchaseOrderStatus.REJECTED
+    order.rejected_by = performed_by
+    order.rejected_at = timezone.now()
+    order.reason = reason.strip()
+    order.modified_by = performed_by
+    order.save(
+        update_fields=[
+            "status", "rejected_by", "rejected_at", "reason", "modified_by", "modified_at",
+        ]
+    )
+    return order
+
+
+@transaction.atomic
+def reopen_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
+    """A rejected order goes back to draft so it can be corrected."""
+    if order.status != PurchaseOrderStatus.REJECTED:
+        raise DomainError("Only a rejected order can be reopened.", code="order_not_rejected")
+    order.status = PurchaseOrderStatus.DRAFT
+    order.modified_by = performed_by
+    order.save(update_fields=["status", "modified_by", "modified_at"])
+    return order
+
+
+def _assert_internal_approver(order: PurchaseOrder, user: User) -> None:
+    """Separation of duties, as far as the current model allows.
+
+    The approver must belong to the buying pharmacy and must not be the
+    person who raised the order — self-approval defeats the control
+    entirely.
+
+    This is a weaker check than it should be: there is no role model yet,
+    so any second colleague can release an order. A proper
+    APPROVE_PURCHASE permission belongs here once roles exist.
+    """
+    if user.organization_id != order.organization_id:
+        raise DomainError("Only the buying pharmacy can approve.", code="not_buyer")
+    if order.created_by_id and order.created_by_id == user.id:
+        raise NotApprover("An order cannot be approved by the person who raised it.")
+
+
+@transaction.atomic
+def submit_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
+    """Internal approval. Releases the order to the depot.
+
+    Called by the owner or manager, not the pharmacist who raised it.
+    """
+    if order.status != PurchaseOrderStatus.PENDING_APPROVAL:
+        raise DomainError("This order is not awaiting approval.", code="order_not_pending")
     if not order.lines.exists():
         raise DomainError("Add a product before submitting.", code="order_empty")
+    _assert_internal_approver(order, performed_by)
 
     relationship = TradingRelationship.objects.filter(
         organization=order.supplier, customer=order.organization, is_active=True
@@ -282,8 +354,15 @@ def submit_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
     order.number = sequences.next_number(order.organization, "PURCHASE_ORDER")
     order.status = PurchaseOrderStatus.SUBMITTED
     order.submitted_at = timezone.now()
+    order.approved_by = performed_by
+    order.approved_at = timezone.now()
     order.modified_by = performed_by
-    order.save(update_fields=["number", "status", "submitted_at", "modified_by", "modified_at"])
+    order.save(
+        update_fields=[
+            "number", "status", "submitted_at", "approved_by", "approved_at",
+            "modified_by", "modified_at",
+        ]
+    )
     return order
 
 
@@ -295,10 +374,48 @@ def confirm_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
     if order.status != PurchaseOrderStatus.SUBMITTED:
         raise DomainError("This order is not awaiting confirmation.", code="order_not_submitted")
 
+    # Approving reserves the goods against the offer. Until now the
+    # quantity was only requested; two buyers could each ask for the last
+    # 200 packs and both be told yes.
+    for line in order.lines.select_related("product"):
+        listing = VendorListing.objects.select_for_update().filter(
+            organization=order.supplier, product=line.product
+        ).first()
+        if listing is None:
+            continue
+        if line.quantity_base > listing.available_base:
+            raise InsufficientOffer(
+                f"{line.product.name} is no longer available in that quantity.",
+                meta={"available_base": listing.available_base},
+            )
+        listing.committed_base += line.quantity_base
+        listing.save(update_fields=["committed_base"])
+
     order.status = PurchaseOrderStatus.CONFIRMED
     order.confirmed_at = timezone.now()
+    order.approved_by = performed_by
+    order.approved_at = timezone.now()
     order.modified_by = performed_by
-    order.save(update_fields=["status", "confirmed_at", "modified_by", "modified_at"])
+    order.save(
+        update_fields=[
+            "status", "confirmed_at", "approved_by", "approved_at",
+            "modified_by", "modified_at",
+        ]
+    )
+    return order
+
+
+@transaction.atomic
+def start_preparation(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
+    """The depot begins picking. Visible to the buyer as tracking."""
+    if order.supplier_id != performed_by.organization_id:
+        raise DomainError("Only the depot can prepare an order.", code="not_supplier")
+    if order.status != PurchaseOrderStatus.CONFIRMED:
+        raise DomainError("Only an approved order can be prepared.", code="order_not_confirmed")
+
+    order.status = PurchaseOrderStatus.PREPARING
+    order.modified_by = performed_by
+    order.save(update_fields=["status", "modified_by", "modified_at"])
     return order
 
 
@@ -345,6 +462,7 @@ def dispatch_order(
         raise DomainError("Only the supplier can dispatch an order.", code="not_supplier")
     if order.status not in (
         PurchaseOrderStatus.CONFIRMED,
+        PurchaseOrderStatus.PREPARING,
         PurchaseOrderStatus.PARTIALLY_DISPATCHED,
         # Fully dispatched is allowed through so the outstanding check
         # below gives the precise reason — "already shipped" tells the
@@ -404,6 +522,16 @@ def dispatch_order(
                 batch_number=movement.batch.batch_number,
                 expiry_date=movement.batch.expiry_date,
             )
+
+        # Shipping consumes the offer, not just the reservation: goods
+        # that have left cannot be offered to anyone else.
+        listing = VendorListing.objects.select_for_update().filter(
+            organization=order.supplier, product=line.product
+        ).first()
+        if listing is not None:
+            listing.offered_base = max(0, listing.offered_base - take)
+            listing.committed_base = max(0, listing.committed_base - take)
+            listing.save(update_fields=["offered_base", "committed_base"])
 
         line.dispatched_base += take
         line.save(update_fields=["dispatched_base"])

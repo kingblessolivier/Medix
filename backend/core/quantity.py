@@ -113,6 +113,28 @@ def from_base(base_value: int, uom: UomLike) -> Quantity:
     return Quantity(base_value // uom.factor_to_base, uom)
 
 
+def compose(entries: list[tuple[int, UomLike]]) -> int:
+    """Base units from a quantity entered across several levels.
+
+    The inverse of :func:`split_to_units`, and the shape a receiving clerk
+    actually counts in: "ten cartons and eight tablets", not "12,008".
+    Recording that as a single number in one unit forces them to do the
+    multiplication in their head, which is where the errors come from.
+
+    Levels may repeat and may arrive in any order; the total is what
+    matters. Negative counts are refused — a direction belongs to the
+    movement, never to the tally.
+    """
+    total = 0
+    for count, uom in entries:
+        if count < 0:
+            raise ValueError(f"{uom.code} count cannot be negative")
+        if uom.factor_to_base <= 0:
+            raise ValueError(f"{uom.code} has a non-positive factor")
+        total += count * uom.factor_to_base
+    return total
+
+
 def split_to_units(base_value: int, chain: list[UomLike]) -> list[Quantity]:
     """Break a base amount into the largest whole units available.
 

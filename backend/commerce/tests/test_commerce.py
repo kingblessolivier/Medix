@@ -56,6 +56,7 @@ def market():
 
     seller = User.objects.create_user(username="jean", password="x", organization=wholesale)
     buyer = User.objects.create_user(username="marie", password="x", organization=retail)
+    owner = User.objects.create_user(username="claudine", password="x", organization=retail)
 
     product = make_product(wholesale, "Amoxicillin 500mg", legal_status=LegalStatus.POM)
     depot = make_location(wholesale, "ABC Depot", "DEP")
@@ -75,11 +76,18 @@ def market():
         "retail": retail,
         "seller": seller,
         "buyer": buyer,
+        "owner": owner,
         "product": product,
         "depot": depot,
         "store": store,
         "batch": batch,
     }
+
+
+def release(order, market):
+    """Raise for approval, then release — two people, as in the real flow."""
+    services.request_approval(order=order, performed_by=market["buyer"])
+    return services.submit_order(order=order, performed_by=market["owner"])
 
 
 class TestCapability:
@@ -138,6 +146,7 @@ class TestListings:
             price=28000,
             price_uom=uom(market["product"], "PACK"),
             moq=10,
+            offered_base=2000,
         )
         assert listing.is_orderable
         assert listing.price == 28000
@@ -162,33 +171,6 @@ class TestListings:
         )
         assert not listing.is_orderable
 
-    def test_comparison_shows_the_tradeoff(self, market):
-        """Cheapest is frequently the wrong choice, so show the rest."""
-        other = make_org("MedSupply", kind=LicenceKind.WHOLESALE_PHARMACY)
-        licence(other, LicenceKind.WHOLESALE_PHARMACY, number="RFDA-WH-MED")
-        # Same catalogue product, offered by a second vendor.
-        services.publish_listing(
-            organization=market["wholesale"],
-            product=market["product"],
-            price=28000,
-            price_uom=uom(market["product"], "PACK"),
-            moq=10,
-            lead_time_days=1,
-        )
-        services.publish_listing(
-            organization=other,
-            product=market["product"],
-            price=27500,
-            price_uom=uom(market["product"], "PACK"),
-            moq=20,
-            lead_time_days=3,
-        )
-
-        rows = services.compare_vendors(product=market["product"])
-        assert [r["price"] for r in rows] == [27500, 28000]
-        cheapest = rows[0]
-        assert cheapest["moq"] == 20 and cheapest["lead_time_days"] == 3
-
 
 class TestOrders:
     def _listing(self, market, **kwargs):
@@ -198,6 +180,7 @@ class TestOrders:
             price=28000,
             price_uom=uom(market["product"], "PACK"),
             moq=kwargs.pop("moq", 10),
+            offered_base=kwargs.pop("offered_base", 2000),
             **kwargs,
         )
 
@@ -220,7 +203,7 @@ class TestOrders:
             performed_by=market["buyer"],
         )
         services.add_order_line(order=order, listing=listing, quantity=10)
-        submitted = services.submit_order(order=order, performed_by=market["buyer"])
+        submitted = release(order, market)
 
         assert submitted.number.startswith("PO-")
         assert submitted.status == PurchaseOrderStatus.SUBMITTED
@@ -236,7 +219,7 @@ class TestOrders:
             performed_by=market["buyer"],
         )
         services.add_order_line(order=order, listing=listing, quantity=10)
-        services.submit_order(order=order, performed_by=market["buyer"])
+        release(order, market)
 
         confirmed = services.confirm_order(order=order, performed_by=market["seller"])
         assert confirmed.status == PurchaseOrderStatus.CONFIRMED
@@ -251,7 +234,7 @@ class TestOrders:
             performed_by=market["buyer"],
         )
         services.add_order_line(order=order, listing=listing, quantity=10)
-        services.submit_order(order=order, performed_by=market["buyer"])
+        release(order, market)
 
         with pytest.raises(Exception, match="supplier"):
             services.confirm_order(order=order, performed_by=market["buyer"])
@@ -267,7 +250,7 @@ class TestOrders:
         )
         services.add_order_line(order=order, listing=listing, quantity=10)
         with pytest.raises(services.CustomerNotVerified):
-            services.submit_order(order=order, performed_by=market["buyer"])
+            release(order, market)
 
     def test_draft_is_reused_per_supplier(self, market):
         """Adding from the marketplace twice builds one order, not two."""
@@ -296,7 +279,7 @@ class TestOrders:
             performed_by=market["buyer"],
         )
         services.add_order_line(order=sent, listing=listing, quantity=10)
-        services.submit_order(order=sent, performed_by=market["buyer"])
+        release(sent, market)
 
         fresh = services.open_draft(
             organization=market["retail"],
@@ -357,7 +340,7 @@ class TestOrders:
             performed_by=market["buyer"],
         )
         with pytest.raises(Exception, match="Add a product"):
-            services.submit_order(order=order, performed_by=market["buyer"])
+            release(order, market)
 
 
 class TestReceiving:
@@ -458,6 +441,7 @@ class TestReceiving:
             price=28000,
             price_uom=uom(market["product"], "PACK"),
             moq=1,
+            offered_base=2000,
         )
         TradingRelationship.objects.create(
             organization=market["wholesale"], customer=market["retail"], is_verified=True
@@ -469,7 +453,7 @@ class TestReceiving:
             performed_by=market["buyer"],
         )
         line = services.add_order_line(order=order, listing=listing, quantity=10)
-        services.submit_order(order=order, performed_by=market["buyer"])
+        release(order, market)
 
         receipt = self._receipt(market, order=order)
         services.add_receipt_line(
@@ -498,6 +482,7 @@ class TestReceiving:
             price=28000,
             price_uom=uom(market["product"], "PACK"),
             moq=1,
+            offered_base=2000,
         )
         TradingRelationship.objects.create(
             organization=market["wholesale"], customer=market["retail"], is_verified=True
@@ -509,7 +494,7 @@ class TestReceiving:
             performed_by=market["buyer"],
         )
         line = services.add_order_line(order=order, listing=listing, quantity=10)
-        services.submit_order(order=order, performed_by=market["buyer"])
+        release(order, market)
 
         receipt = self._receipt(market, order=order)
         services.add_receipt_line(
@@ -684,6 +669,7 @@ class TestDispatch:
             price=28000,
             price_uom=uom(market["product"], "PACK"),
             moq=1,
+            offered_base=2000,
         )
         TradingRelationship.objects.create(
             organization=market["wholesale"],
@@ -698,7 +684,7 @@ class TestDispatch:
             performed_by=market["buyer"],
         )
         services.add_order_line(order=order, listing=listing, quantity=quantity)
-        services.submit_order(order=order, performed_by=market["buyer"])
+        release(order, market)
         services.confirm_order(order=order, performed_by=market["seller"])
         return order
 
@@ -759,6 +745,7 @@ class TestDispatch:
             price=28000,
             price_uom=uom(market["product"], "PACK"),
             moq=1,
+            offered_base=2000,
         )
         order = services.start_order(
             organization=market["retail"],
@@ -773,19 +760,35 @@ class TestDispatch:
             )
 
     def test_short_pick_leaves_the_rest_owed(self, market):
-        """A supplier ships what they hold; the shortfall stays outstanding."""
-        # Depot holds 20 packs; order 30.
-        order = self._confirmed_order(market, quantity=30)
+        """A depot ships what it holds; the shortfall stays outstanding.
+
+        Ordering more than was offered is refused outright now, so a short
+        pick no longer comes from an oversized order. It comes from the
+        gap between approving an order and picking it: stock written off
+        for expiry in between is stock that cannot be shipped.
+        """
+        order = self._confirmed_order(market, quantity=20)
+
+        # Half the shelf expires before the picker reaches it.
+        inventory.post_movement(
+            organization=market["wholesale"],
+            location=market["depot"],
+            batch=market["batch"],
+            kind=MovementKind.EXPIRY_WRITE_OFF,
+            quantity=Quantity(10, uom(market["product"], "PACK")),
+            reason="Expired before dispatch",
+        )
+
         shipment = services.dispatch_order(
             order=order, from_location=market["depot"], performed_by=market["seller"]
         )
 
         order.refresh_from_db()
         line = order.lines.get()
-        assert line.dispatched_base == 2000
+        assert line.dispatched_base == 1000
         assert line.undispatched_base == 1000
         assert order.status == PurchaseOrderStatus.PARTIALLY_DISPATCHED
-        assert sum(l.quantity_base for l in shipment.lines.all()) == 2000
+        assert sum(l.quantity_base for l in shipment.lines.all()) == 1000
 
     def test_full_dispatch_closes_the_order(self, market):
         order = self._confirmed_order(market, quantity=20)
@@ -883,3 +886,165 @@ class TestDispatch:
         arrived = buyer_after - buyer_before
         assert left == 500
         assert arrived == left
+
+
+class TestOffer:
+    """A depot's holding and its offer are different numbers.
+
+    Publishing the true balance would tell every customer exactly what the
+    depot holds, and would let a buyer plan around stock reserved for
+    somewhere else.
+    """
+
+    def _listing(self, market, offered_base=1000, **kwargs):
+        return services.publish_listing(
+            organization=market["wholesale"],
+            product=market["product"],
+            price=28000,
+            price_uom=uom(market["product"], "PACK"),
+            moq=1,
+            offered_base=offered_base,
+            **kwargs,
+        )
+
+    def test_offer_is_a_slice_of_stock_not_all_of_it(self, market):
+        """Depot holds 20 packs, offers 10. The other 10 stay private."""
+        listing = self._listing(market, offered_base=1000)
+        on_hand = inventory.balance_for(
+            organization=market["wholesale"], product=market["product"]
+        )
+        assert on_hand == 2000
+        assert listing.offered_base == 1000
+        assert listing.available_base == 1000
+
+    def test_cannot_offer_more_than_held(self, market):
+        """Publishing stock you do not have makes a buyer plan on nothing."""
+        with pytest.raises(Exception, match="more than is held"):
+            self._listing(market, offered_base=9999)
+
+    def test_order_cannot_exceed_the_offer(self, market):
+        listing = self._listing(market, offered_base=500)
+        order = services.start_order(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+        with pytest.raises(services.InsufficientOffer):
+            services.add_order_line(order=order, listing=listing, quantity=10)
+
+    def test_approval_commits_the_offer(self, market):
+        """Two buyers must not both be promised the last packs."""
+        listing = self._listing(market, offered_base=1000)
+        TradingRelationship.objects.create(
+            organization=market["wholesale"], customer=market["retail"],
+            is_verified=True, verified_at=timezone.now(),
+        )
+        order = services.start_order(
+            organization=market["retail"], supplier=market["wholesale"],
+            deliver_to=market["store"], performed_by=market["buyer"],
+        )
+        services.add_order_line(order=order, listing=listing, quantity=10)
+        release(order, market)
+        services.confirm_order(order=order, performed_by=market["seller"])
+
+        listing.refresh_from_db()
+        assert listing.committed_base == 1000
+        assert listing.available_base == 0
+
+    def test_dispatch_consumes_the_offer(self, market):
+        """Goods that have shipped cannot be offered to anyone else."""
+        listing = self._listing(market, offered_base=1000)
+        TradingRelationship.objects.create(
+            organization=market["wholesale"], customer=market["retail"],
+            is_verified=True, verified_at=timezone.now(),
+        )
+        order = services.start_order(
+            organization=market["retail"], supplier=market["wholesale"],
+            deliver_to=market["store"], performed_by=market["buyer"],
+        )
+        services.add_order_line(order=order, listing=listing, quantity=10)
+        release(order, market)
+        services.confirm_order(order=order, performed_by=market["seller"])
+        services.dispatch_order(
+            order=order, from_location=market["depot"], performed_by=market["seller"]
+        )
+
+        listing.refresh_from_db()
+        assert listing.offered_base == 0
+        assert listing.committed_base == 0
+
+
+class TestApprovalChain:
+    """A pharmacist raises, someone else releases, then the depot approves."""
+
+    def _pending(self, market):
+        listing = services.publish_listing(
+            organization=market["wholesale"], product=market["product"],
+            price=28000, price_uom=uom(market["product"], "PACK"),
+            moq=1, offered_base=2000,
+        )
+        TradingRelationship.objects.create(
+            organization=market["wholesale"], customer=market["retail"],
+            is_verified=True, verified_at=timezone.now(),
+        )
+        order = services.start_order(
+            organization=market["retail"], supplier=market["wholesale"],
+            deliver_to=market["store"], performed_by=market["buyer"],
+        )
+        services.add_order_line(order=order, listing=listing, quantity=5)
+        services.request_approval(order=order, performed_by=market["buyer"])
+        return order
+
+    def test_raising_does_not_reach_the_depot(self, market):
+        order = self._pending(market)
+        assert order.status == PurchaseOrderStatus.PENDING_APPROVAL
+        # Unnumbered: a purchase order number is issued on release, so a
+        # draft that is never approved does not burn one.
+        assert order.number == ""
+
+    def test_raiser_cannot_approve_their_own_order(self, market):
+        """Self-approval defeats the control entirely."""
+        order = self._pending(market)
+        with pytest.raises(services.NotApprover):
+            services.submit_order(order=order, performed_by=market["buyer"])
+
+    def test_a_colleague_releases_it(self, market):
+        order = self._pending(market)
+        released = services.submit_order(order=order, performed_by=market["owner"])
+        assert released.status == PurchaseOrderStatus.SUBMITTED
+        assert released.number.startswith("PO-")
+        assert released.approved_by_id == market["owner"].id
+
+    def test_the_depot_cannot_release_the_buyers_order(self, market):
+        order = self._pending(market)
+        with pytest.raises(Exception, match="buying pharmacy"):
+            services.submit_order(order=order, performed_by=market["seller"])
+
+    def test_rejection_needs_a_reason(self, market):
+        order = self._pending(market)
+        with pytest.raises(Exception, match="reason"):
+            services.reject_order(order=order, performed_by=market["owner"], reason="  ")
+
+    def test_rejected_order_goes_back_for_correction(self, market):
+        order = self._pending(market)
+        services.reject_order(
+            order=order, performed_by=market["owner"], reason="Over budget this month"
+        )
+        assert order.status == PurchaseOrderStatus.REJECTED
+        assert order.reason == "Over budget this month"
+        assert order.rejected_by_id == market["owner"].id
+
+        services.reopen_order(order=order, performed_by=market["buyer"])
+        assert order.status == PurchaseOrderStatus.DRAFT
+
+    def test_preparation_is_the_depots_step(self, market):
+        order = self._pending(market)
+        services.submit_order(order=order, performed_by=market["owner"])
+        services.confirm_order(order=order, performed_by=market["seller"])
+
+        with pytest.raises(Exception, match="depot"):
+            services.start_preparation(order=order, performed_by=market["buyer"])
+
+        services.start_preparation(order=order, performed_by=market["seller"])
+        assert order.status == PurchaseOrderStatus.PREPARING

@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { ApiFailure, api, type MarketplaceRow, type VendorRow } from "@/lib/api";
+import { ApiFailure, api, type MarketplaceRow } from "@/lib/api";
 import {
   DataTable,
   DataToolbar,
@@ -48,7 +48,6 @@ import {
 import { DetailList, Modal } from "@/components/ui/Modal";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
-const MONTH = new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" });
 
 const AVAILABILITY: Record<string, { tone: Tone; label: string }> = {
   AVAILABLE_NOW: { tone: "ok", label: "Available" },
@@ -129,11 +128,11 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
     { key: "vendor", header: "Supplier", render: (r) => r.vendor_name },
     {
       key: "stock",
-      header: "Stock",
+      header: "Available",
       numeric: true,
       sortable: true,
-      render: (r) => (r.is_orderable ? r.stock_base.toLocaleString() : "—"),
-      sortValue: (r) => r.stock_base,
+      render: (r) => (r.is_orderable ? r.available_base.toLocaleString() : "—"),
+      sortValue: (r) => r.available_base,
     },
     {
       key: "price",
@@ -347,7 +346,7 @@ function CardGrid({
                   {row.is_orderable ? CURRENCY.format(row.price) : "—"}
                 </span>
                 <span className="text-help text-text-2">
-                  {row.is_orderable ? `${row.stock_base.toLocaleString()} left` : state.label}
+                  {row.is_orderable ? `${row.available_base.toLocaleString()} left` : state.label}
                 </span>
               </div>
 
@@ -381,12 +380,6 @@ function CompareModal({
   const [quantity, setQuantity] = useState("");
   const [added, setAdded] = useState<{ number: string | null; lines: number } | null>(null);
   const [failure, setFailure] = useState("");
-
-  const vendors = useQuery({
-    queryKey: ["compare", row?.product],
-    queryFn: () => api.compareVendors(row!.product),
-    enabled: Boolean(row),
-  });
 
   // Each product opens on its own minimum, and last product's outcome
   // must not linger on the next one.
@@ -499,60 +492,7 @@ function CompareModal({
         ]}
       />
 
-      <h3 className="mb-2 mt-6 text-section font-semibold">All suppliers</h3>
-      {vendors.isLoading ? (
-        <p className="text-body text-text-2">Loading…</p>
-      ) : (
-        <VendorTable rows={vendors.data ?? []} />
-      )}
     </Modal>
   );
 }
 
-const VENDOR_COLUMNS: Column<VendorRow>[] = [
-  { key: "vendor", header: "Supplier", render: (v) => v.vendor_name },
-  {
-    key: "price",
-    header: "Price",
-    numeric: true,
-    sortable: true,
-    render: (v) => CURRENCY.format(v.price),
-    sortValue: (v) => v.price,
-  },
-  {
-    key: "stock",
-    header: "Stock",
-    numeric: true,
-    sortable: true,
-    render: (v) => v.stock_base.toLocaleString(),
-    sortValue: (v) => v.stock_base,
-  },
-  {
-    key: "expiry",
-    header: "Expiry",
-    sortable: true,
-    // Cheapest with three months left is rarely the right buy, so expiry
-    // sits beside price rather than behind a click.
-    render: (v) => (
-      <span className="text-text-2">
-        {v.earliest_expiry ? MONTH.format(new Date(v.earliest_expiry)) : "—"}
-      </span>
-    ),
-    sortValue: (v) => v.earliest_expiry ?? "",
-  },
-  { key: "moq", header: "MOQ", numeric: true, render: (v) => v.moq },
-  { key: "lead", header: "Days", numeric: true, render: (v) => v.lead_time_days },
-];
-
-function VendorTable({ rows }: { rows: VendorRow[] }) {
-  return (
-    <DataTable
-      columns={VENDOR_COLUMNS}
-      rows={rows}
-      rowKey={(v) => v.listing_id}
-      density="compact"
-      caption="Suppliers offering this product"
-      emptyHeading="No suppliers"
-    />
-  );
-}
