@@ -33,6 +33,7 @@ import {
   Input,
   PageHeader,
   StatusDot,
+  StatusPill,
 } from "@/components/ui";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
@@ -111,9 +112,9 @@ function AwaitingDelivery({ onReceive }: { onReceive: (order: PurchaseOrder) => 
       width: "11rem",
       render: (o) =>
         o.status === "PARTIALLY_RECEIVED" ? (
-          <StatusDot tone="warn">Part received</StatusDot>
+          <StatusPill tone="warn">Part received</StatusPill>
         ) : (
-          <StatusDot tone="info">Confirmed</StatusDot>
+          <StatusPill tone="info">Confirmed</StatusPill>
         ),
     },
   ];

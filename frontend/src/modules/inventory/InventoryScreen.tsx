@@ -12,7 +12,14 @@ import { useMemo, useState } from "react";
 
 import { api, type Movement, type StockRow } from "@/lib/api";
 import { DataTable, DataToolbar, type Column, type Density } from "@/components/data/DataTable";
-import { Button, ErrorState, PageHeader, StatusDot, type Tone } from "@/components/ui";
+import {
+  Button,
+  ErrorState,
+  PageHeader,
+  StatusDot,
+  StatusPill,
+  type Tone,
+} from "@/components/ui";
 import { DetailList, Drawer } from "@/components/ui/Drawer";
 
 /** Expiry banding. Status is never colour alone — the dot carries a label. */
@@ -91,7 +98,7 @@ export function InventoryScreen() {
       header: "Status",
       render: (r) => {
         const { tone, label } = expiryTone(r.days_to_expiry);
-        return <StatusDot tone={tone}>{label}</StatusDot>;
+        return <StatusPill tone={tone}>{label}</StatusPill>;
       },
     },
   ];

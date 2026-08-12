@@ -26,6 +26,7 @@ import {
   Input,
   PageHeader,
   StatusDot,
+  StatusPill,
   type Tone,
 } from "@/components/ui";
 import { DetailList, Drawer } from "@/components/ui/Drawer";
@@ -93,7 +94,7 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
       header: "Status",
       render: (r) => {
         const state = AVAILABILITY[r.availability] ?? AVAILABILITY.NOT_IN_COUNTRY;
-        return <StatusDot tone={state.tone}>{state.label}</StatusDot>;
+        return <StatusPill tone={state.tone}>{state.label}</StatusPill>;
       },
     },
   ];

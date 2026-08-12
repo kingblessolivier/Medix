@@ -8,12 +8,27 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Send } from "lucide-react";
+import { Check, CircleCheck, List, Send, Truck } from "lucide-react";
 import { useState } from "react";
 
 import { api, type OrderLine, type PurchaseOrder } from "@/lib/api";
-import { DataTable, type Column, type Density } from "@/components/data/DataTable";
-import { Button, ErrorState, PageHeader, StatusDot, type Tone } from "@/components/ui";
+import {
+  DataTable,
+  DataToolbar,
+  TableTabs,
+  type Column,
+  type Density,
+  type RowAction,
+  type TableTab,
+} from "@/components/data/DataTable";
+import {
+  Button,
+  ErrorState,
+  PageHeader,
+  StatusDot,
+  StatusPill,
+  type Tone,
+} from "@/components/ui";
 import { DetailList, Drawer } from "@/components/ui/Drawer";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
@@ -59,11 +74,23 @@ const LINE_COLUMNS: Column<OrderLine>[] = [
   },
 ];
 
+/* Saved views over the same list. The counts are the reason to click, so
+   they are on the tab rather than discovered after it. */
+const VIEWS: { id: string; label: string; icon: typeof List; match?: string[] }[] = [
+  { id: "all", label: "All orders", icon: List },
+  { id: "open", label: "Awaiting", icon: Truck, match: ["DRAFT", "SUBMITTED"] },
+  { id: "confirmed", label: "Confirmed", icon: CircleCheck, match: ["CONFIRMED"] },
+  { id: "closed", label: "Received", icon: Check, match: ["RECEIVED", "PARTIALLY_RECEIVED"] },
+];
+
 export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
   const queryClient = useQueryClient();
   const [side, setSide] = useState<"placed" | "received">(canSupply ? "received" : "placed");
   const [density] = useState<Density>("compact");
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
+  const [view, setView] = useState("all");
+  const [filter, setFilter] = useState("");
+  const [checked, setChecked] = useState<Set<string>>(new Set());
 
   const orders = useQuery({
     queryKey: ["orders", side],
@@ -74,7 +101,10 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
     mutationFn: (id: string) => api.confirmOrder(id),
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });
-      setSelected(updated);
+      // Refresh the drawer only if it is already open on this order.
+      // Assigning unconditionally made a bulk confirm throw the last
+      // order's drawer in the user's face.
+      setSelected((open) => (open && open.id === updated.id ? updated : open));
     },
   });
 
@@ -82,13 +112,54 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
     mutationFn: (id: string) => api.submitOrder(id),
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });
-      setSelected(updated);
+      // Refresh the drawer only if it is already open on this order.
+      // Assigning unconditionally made a bulk confirm throw the last
+      // order's drawer in the user's face.
+      setSelected((open) => (open && open.id === updated.id ? updated : open));
     },
   });
 
-  const rows = (orders.data?.results ?? []).filter((o) =>
+  // A supplier never sees the buyer's unsent drafts.
+  const visible = (orders.data?.results ?? []).filter((o) =>
     side === "placed" ? true : o.status !== "DRAFT",
   );
+
+  const counts = Object.fromEntries(
+    VIEWS.map((v) => [
+      v.id,
+      v.match ? visible.filter((o) => v.match!.includes(o.status)).length : visible.length,
+    ]),
+  );
+  const tabs: TableTab[] = VIEWS.map((v) => ({
+    id: v.id,
+    label: v.label,
+    icon: v.icon,
+    count: counts[v.id],
+  }));
+
+  const term = filter.trim().toLowerCase();
+  const chosenView = VIEWS.find((v) => v.id === view);
+  const rows = visible
+    .filter((o) => !chosenView?.match || chosenView.match.includes(o.status))
+    .filter(
+      (o) =>
+        !term ||
+        o.number.toLowerCase().includes(term) ||
+        (side === "received" ? o.buyer_name : o.supplier_name).toLowerCase().includes(term),
+    );
+
+  /* Confirming a stack of orders one drawer at a time is the tedium this
+     removes. Only the supplier may confirm, and only what is submitted. */
+  const confirmable = (o: PurchaseOrder) => side === "received" && o.status === "SUBMITTED";
+
+  const rowActions: RowAction<PurchaseOrder>[] = [
+    { label: "Open", onSelect: setSelected },
+    {
+      label: side === "received" ? "Confirm order" : "Submit order",
+      onSelect: (o) => (side === "received" ? confirm.mutate(o.id) : submit.mutate(o.id)),
+      disabled: (o) => (side === "received" ? !confirmable(o) : o.status !== "DRAFT"),
+    },
+  ];
 
   const columns: Column<PurchaseOrder>[] = [
     {
@@ -124,7 +195,7 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
       header: "Status",
       render: (o) => {
         const s = STATUS[o.status] ?? STATUS.DRAFT;
-        return <StatusDot tone={s.tone}>{s.label}</StatusDot>;
+        return <StatusPill tone={s.tone}>{s.label}</StatusPill>;
       },
     },
   ];
@@ -155,9 +226,17 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
       {side === "received" && awaiting > 0 && (
         <div className="mb-4 flex flex-wrap gap-8 border-b border-hair pb-4">
           <Metric label="Awaiting confirmation" value={awaiting} tone="text-warn-text" />
-          <Metric label="Total orders" value={rows.length} />
+          <Metric label="Total orders" value={visible.length} />
         </div>
       )}
+
+      <TableTabs tabs={tabs} active={view} onChange={setView} />
+
+      <DataToolbar
+        search={filter}
+        onSearch={setFilter}
+        searchPlaceholder="Filter orders"
+      />
 
       <DataTable
         columns={columns}
@@ -167,6 +246,27 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
         loading={orders.isLoading}
         caption="Purchase orders"
         onRowClick={setSelected}
+        selectable
+        selected={checked}
+        onSelectionChange={setChecked}
+        rowLabel={(o) => `Select order ${o.number || "draft"}`}
+        rowActions={rowActions}
+        bulkActions={(picked) => {
+          const ready = picked.filter(confirmable);
+          return (
+            <Button
+              variant="primary"
+              icon={<Check size={15} strokeWidth={2} />}
+              disabled={ready.length === 0 || confirm.isPending}
+              onClick={() => {
+                ready.forEach((o) => confirm.mutate(o.id));
+                setChecked(new Set());
+              }}
+            >
+              Confirm {ready.length}
+            </Button>
+          );
+        }}
         emptyHeading={side === "received" ? "No orders yet" : "No orders"}
         emptyBody={
           side === "received"

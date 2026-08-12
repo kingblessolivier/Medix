@@ -7,14 +7,16 @@
 
 import clsx from "clsx";
 import {
+  Check,
   CircleAlert,
   CircleCheck,
   Info,
+  Minus,
   TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 
 /* -- Button ------------------------------------------------------------ */
 
@@ -146,6 +148,62 @@ export function Select({
   );
 }
 
+/* -- Checkbox ---------------------------------------------------------- */
+
+/* Row selection needs a real <input type=checkbox> for keyboard and
+ * screen readers; `indeterminate` is a DOM property, not an attribute,
+ * so it has to be set through a ref. */
+
+export function Checkbox({
+  checked = false,
+  indeterminate = false,
+  onChange,
+  label,
+  className,
+}: {
+  checked?: boolean;
+  indeterminate?: boolean;
+  onChange: (checked: boolean) => void;
+  /** Always required — invisible, but the row must be nameable. */
+  label: string;
+  className?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate && !checked;
+  }, [indeterminate, checked]);
+
+  const marked = checked || indeterminate;
+
+  return (
+    <span className={clsx("relative inline-flex h-4 w-4 shrink-0", className)}>
+      <input
+        ref={ref}
+        type="checkbox"
+        aria-label={label}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        onClick={(e) => e.stopPropagation()}
+        className={clsx(
+          "peer h-4 w-4 cursor-pointer appearance-none rounded-sm border transition-colors",
+          marked ? "border-brand bg-brand" : "border-control bg-surface hover:border-text-2",
+        )}
+      />
+      {/* Drawn in --on-brand, not white: the dark theme's brand is a pale
+          green where a white tick would disappear. */}
+      {marked && (
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-on-brand">
+          {checked ? (
+            <Check size={12} strokeWidth={3} aria-hidden />
+          ) : (
+            <Minus size={12} strokeWidth={3} aria-hidden />
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /* -- Status ------------------------------------------------------------ */
 
 /* Status is never colour alone. The dot always carries its label. */
@@ -176,6 +234,25 @@ export function StatusDot({ tone, children }: { tone: Tone; children: ReactNode 
   return (
     <span className={clsx("inline-flex items-center gap-1.5 text-body", TEXT[tone])}>
       <span aria-hidden className={clsx("h-2 w-2 shrink-0 rounded-full", DOT[tone])} />
+      {children}
+    </span>
+  );
+}
+
+/* The table form of a status: tinted pill, leading dot, small caps.
+ * Reads as one object at a glance down a column, where a bare dot and
+ * sentence-case label blur together. StatusDot stays for drawers and
+ * prose, where a pill would shout. */
+export function StatusPill({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full py-0.5 pl-1.5 pr-2",
+        "text-group font-semibold uppercase",
+        BADGE[tone],
+      )}
+    >
+      <span aria-hidden className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", DOT[tone])} />
       {children}
     </span>
   );

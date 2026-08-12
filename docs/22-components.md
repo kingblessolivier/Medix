@@ -131,6 +131,34 @@ On by default. The header stays fixed for any row count, with `--content` backgr
 - **Empty** — see §12.
 - **Error** — inline message with a retry, table chrome preserved.
 
+### Saved views
+
+Counted tabs sit above the toolbar: `All orders 73 · Awaiting 21 · Confirmed 16 · Received 36`. The count belongs on the tab, because the count is usually the reason to click it.
+
+These are **filters over one list**, not navigation. The page title and URL do not change. A tab that loads a different resource is a nav item and belongs in the sidebar.
+
+```tsx
+<TableTabs tabs={tabs} active={view} onChange={setView} />
+```
+
+### Selection and bulk actions
+
+`selectable` adds the checkbox column; the selected ids are owned by the screen, not the table, so a screen can preserve a selection across a refetch.
+
+- Header checkbox is **indeterminate** when some but not all visible rows are chosen. `indeterminate` is a DOM property, not an attribute — it must be set through a ref.
+- Select-all affects **only rows currently in view**. A row filtered out keeps whatever the user already decided about it.
+- A selected row gets a `--selected` tint plus a 2px `--brand` bar on its leading edge. Never a saturated fill — the data has to stay readable.
+- The tick is drawn in `--on-brand`, never white: the dark theme's brand is a pale green.
+- The bulk bar appears **above** the table, so the rows it acts on stay visible. It never floats over content.
+
+A bulk action must not open a drawer. Acting on twenty rows and being handed the twentieth row's detail panel is a bug, not a confirmation.
+
+### Row overflow
+
+The primary action is always the row click. The `⋯` menu is for the two or three things that are not it — and each entry states its own availability rather than disappearing, so the menu does not change shape between rows.
+
+Closes on outside click and on `Escape`. Destructive entries take `--bad-text` and sit last.
+
 ### What the table must never do
 
 - Zebra striping. Hairlines are enough and striping fights the status dots.
@@ -367,13 +395,25 @@ Loading state replaces the label with a spinner and keeps the width, so the layo
 
 ## 11 — Status, badges, chips
 
-**Status** is a dot plus a label. Never colour alone, never a coloured row.
+**Status** is never colour alone and never a coloured row. It comes in two forms, and they are not interchangeable.
+
+**`StatusDot`** — a dot plus a sentence-case label, for drawers, detail lists and prose.
 
 ```
 ● Available    ● Expiring    ● Critical    ● Draft
 ```
 
-Dot 8px, gap 6px, label 12px / 500 in the semantic colour.
+Dot 8px, gap 6px, label 13px in the semantic **text** ramp.
+
+**`StatusPill`** — the table form: tinted pill, 6px leading dot, 10px small caps.
+
+```
+[● FULFILLED]  [● CONFIRMED]  [● PARTIALLY SHIPPED]
+```
+
+Down a column of forty rows a bare dot and a sentence-case label blur into the neighbouring cells; the pill reads as one object. In a drawer the same pill shouts. Use the pill inside `DataTable` columns, the dot everywhere else.
+
+Both take their word colour from `--ok-text` / `--warn-text` / `--bad-text` / `--info-text`, never from the mark ramp — see `docs/04-design-system.md`.
 
 **Badge** — a filled pill for counts and states: `3px 8px`, radius `999px`, 11px / 600, semantic tint background with same-family text.
 
