@@ -380,6 +380,20 @@ class GoodsReceiptSerializer(serializers.ModelSerializer):
         ]
 
 
+class AcknowledgeSerializer(serializers.Serializer):
+    """Warnings the caller has seen and accepted.
+
+    Codes, not a boolean. "I accepted the warnings" is unfalsifiable once
+    a new warning appears; naming them means a check added tomorrow is
+    not silently pre-accepted by yesterday's client.
+    """
+
+    acknowledged = serializers.ListField(
+        child=serializers.CharField(max_length=60), required=False, default=list
+    )
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
 class ImportTransferSerializer(serializers.Serializer):
     """A supplier's advance notice, arriving as a file.
 

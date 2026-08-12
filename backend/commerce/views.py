@@ -29,6 +29,7 @@ from commerce.models import (
     VendorListing,
 )
 from commerce.serializers import (
+    AcknowledgeSerializer,
     AddOrderLineSerializer,
     LandedCostSerializer,
     AddReceiptLineSerializer,
@@ -283,8 +284,20 @@ class PurchaseOrderViewSet(
 
     @action(detail=True, methods=["post"])
     def confirm(self, request, pk=None):
-        """Supplier accepts. Only the supplier may."""
-        order = services.confirm_order(order=self.get_object(), performed_by=request.user)
+        """Supplier accepts. Only the supplier may.
+
+        Warnings — credit approaching the limit — come back as a 422
+        naming their codes. The client presents them, collects an
+        acknowledgement and retries with the codes in `acknowledged`.
+        """
+        payload = AcknowledgeSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        order = services.confirm_order(
+            order=self.get_object(),
+            performed_by=request.user,
+            acknowledged=payload.validated_data.get("acknowledged", []),
+            reason=payload.validated_data.get("reason", ""),
+        )
         return Response(PurchaseOrderSerializer(order).data)
 
     @action(detail=True, methods=["post"])

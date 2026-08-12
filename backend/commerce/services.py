@@ -17,9 +17,10 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
+from catalog import checks as catalog_checks
 from catalog.models import LegalStatus, Product, UnitOfMeasure
-from commerce import invoicing
-from core import audit, sequences
+from commerce import checks, invoicing
+from core import alerts, audit, sequences
 from core.capabilities import Capability, require_capability
 from core.exceptions import DomainError, InsufficientStock
 from core.models import Organization, PharmacistRegistration, User
@@ -159,6 +160,7 @@ def publish_listing(
     lead_time_days: int = 1,
     offered_base: int | None = None,
     performed_by: User | None = None,
+    acknowledged: list[str] | None = None,
 ) -> VendorListing:
     """Offer a product for sale, and say how much of it.
 
@@ -173,6 +175,15 @@ def publish_listing(
     never there.
     """
     require_capability(organization, Capability.PUBLISH_LISTINGS)
+
+    # A lapsed registration blocks the listing. Offering a product that
+    # cannot legally be dispensed puts the buyer in breach, not us.
+    alerts.enforce(
+        catalog_checks.registration(product=product),
+        organization=organization,
+        performed_by=performed_by,
+        acknowledged=acknowledged,
+    )
 
     if offered_base is not None:
         if offered_base < 0:
@@ -496,18 +507,39 @@ def submit_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
 
 
 @transaction.atomic
-def confirm_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
+def confirm_order(
+    *,
+    order: PurchaseOrder,
+    performed_by: User,
+    acknowledged: list[str] | None = None,
+    reason: str = "",
+) -> PurchaseOrder:
     """The supplier accepts. Only the supplier may do this."""
     if order.supplier_id != performed_by.organization_id:
         raise DomainError("Only the supplier can confirm an order.", code="not_supplier")
     if order.status != PurchaseOrderStatus.SUBMITTED:
         raise DomainError("This order is not awaiting confirmation.", code="order_not_submitted")
 
-    # Credit is checked here, counting this order. Checking only historic
-    # debt lets a pharmacy sitting at its limit place one more order every
-    # time, because the new one is never part of the sum.
-    invoicing.assert_within_credit(
-        supplier=order.supplier, customer=order.organization, pending=order.subtotal
+    # Credit and licence are checked here, counting this order. Checking
+    # only historic debt lets a pharmacy sitting at its limit place one
+    # more order every time, because the new one is never part of the sum.
+    #
+    # Both go through the alert framework: over the limit is a refusal,
+    # approaching it is a warning the depot may accept with a reason, and
+    # a lapsed licence is a refusal. One mechanism, three severities.
+    alerts.enforce(
+        [
+            *checks.buyer_licence(customer=order.organization),
+            *checks.credit(
+                supplier=order.supplier,
+                customer=order.organization,
+                pending=order.subtotal,
+            ),
+        ],
+        organization=order.supplier,
+        performed_by=performed_by,
+        acknowledged=acknowledged or [],
+        reason=reason,
     )
 
     # Approving reserves the goods against the offer. Until now the

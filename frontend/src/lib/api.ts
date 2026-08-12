@@ -337,6 +337,26 @@ export type OrderLine = {
   undispatched_base: number;
 };
 
+/* Severity is behaviour, not decoration: CRITICAL means the request was
+   refused, WARNING means it will be refused until the code comes back in
+   `acknowledged`, INFO never interrupts. See docs/29-alerts.md. */
+export type Alert = {
+  code: string;
+  severity: "CRITICAL" | "WARNING" | "INFO";
+  title: string;
+  detail: string;
+  subject_type: string;
+  subject_id: string;
+  meta: Record<string, unknown>;
+};
+
+export type AlertSummary = {
+  visible: Alert[];
+  /** How many the fatigue rule folded away. */
+  collapsed: number;
+  counts: Record<string, number>;
+};
+
 /* One step of the order's history. Both parties read the same rows —
    this is the sanitised half of the audit trail, not the internal one. */
 export type OrderEvent = {
@@ -527,8 +547,15 @@ export const api = {
     request<PurchaseOrder>(`/purchase-orders/${id}/lines/`, { method: "POST", body }),
   submitOrder: (id: string) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/submit/`, { method: "POST", body: {} }),
-  confirmOrder: (id: string) =>
-    request<PurchaseOrder>(`/purchase-orders/${id}/confirm/`, { method: "POST", body: {} }),
+  /* Warnings come back 422 with their codes. Present them, collect the
+     acknowledgement, and retry naming the codes accepted — never a bare
+     "yes", so a check added tomorrow is not pre-accepted by today's
+     client. */
+  confirmOrder: (id: string, body: { acknowledged?: string[]; reason?: string } = {}) =>
+    request<PurchaseOrder>(`/purchase-orders/${id}/confirm/`, { method: "POST", body }),
+
+  alerts: (scope = "inventory") =>
+    request<AlertSummary>(`/alerts/?scope=${encodeURIComponent(scope)}`),
 
   dispatchOrder: (id: string, body: { from_location: string; carrier?: string }) =>
     request<Shipment>(`/purchase-orders/${id}/dispatch_order/`, { method: "POST", body }),

@@ -278,7 +278,13 @@ class TestCredit:
         and would approve the next one too, for ever.
         """
         first = make_order(trade, packs=45, price=20_000)  # 900,000
-        services.confirm_order(order=first, performed_by=trade["seller"])
+        # 90% of the limit, so the depot has to accept the warning before
+        # this one goes through — see docs/29 §6.
+        services.confirm_order(
+            order=first,
+            performed_by=trade["seller"],
+            acknowledged=["CREDIT_LIMIT_NEAR"],
+        )
         invoice = invoicing.build_invoice(order=first, performed_by=trade["seller"])
         invoice.tax_total = 0
         invoice.total = 900_000
@@ -291,7 +297,11 @@ class TestCredit:
 
     def test_paying_frees_the_limit_again(self, trade):
         first = make_order(trade, packs=45, price=20_000)
-        services.confirm_order(order=first, performed_by=trade["seller"])
+        services.confirm_order(
+            order=first,
+            performed_by=trade["seller"],
+            acknowledged=["CREDIT_LIMIT_NEAR"],
+        )
         invoice = invoicing.build_invoice(order=first, performed_by=trade["seller"])
         invoice.tax_total = 0
         invoice.total = 900_000

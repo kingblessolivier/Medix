@@ -11,7 +11,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CircleCheck, List, PackageCheck, Send, Truck } from "lucide-react";
 import { useState } from "react";
 
-import { ApiFailure, api, type OrderLine, type PurchaseOrder } from "@/lib/api";
+import {
+  ApiFailure,
+  api,
+  type Alert,
+  type OrderLine,
+  type PurchaseOrder,
+} from "@/lib/api";
 import {
   DataTable,
   DataToolbar,
@@ -31,6 +37,7 @@ import {
   type Tone,
 } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
+import { AlertStack } from "@/components/ui/AlertStack";
 import { OrderTimeline } from "./OrderTimeline";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
@@ -118,14 +125,32 @@ export function OrdersScreen({
     queryFn: () => (side === "received" ? api.fulfilment() : api.orders()),
   });
 
+  /* Warnings the depot has been shown and accepted for this order. Held
+     per confirm attempt rather than for the session: accepting a credit
+     warning on one order must not silently accept it on the next. */
+  const [pending, setPending] = useState<Alert[]>([]);
+  const [accepted, setAccepted] = useState<string[]>([]);
+
   const confirm = useMutation({
-    mutationFn: (id: string) => api.confirmOrder(id),
+    mutationFn: (id: string) => api.confirmOrder(id, { acknowledged: accepted }),
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });
+      setPending([]);
+      setAccepted([]);
       // Refresh the drawer only if it is already open on this order.
       // Assigning unconditionally made a bulk confirm throw the last
       // order's drawer in the user's face.
       setSelected((open) => (open && open.id === updated.id ? updated : open));
+    },
+    onError: (error) => {
+      // A refused confirm names what has to be accepted. Show those
+      // rather than the generic message — "acknowledgement required"
+      // tells the depot nothing about which customer or which limit.
+      if (error instanceof ApiFailure) {
+        const raised = (error.error.meta?.alerts as Alert[] | undefined) ?? [];
+        setPending(raised);
+        if (raised.length === 0) setFailure(error.error.message);
+      }
     },
   });
 
@@ -326,7 +351,14 @@ export function OrdersScreen({
       <OrderModal
         order={selected}
         side={side}
-        onClose={() => setSelected(null)}
+        alerts={pending}
+        onAcknowledge={(alert) => setAccepted((codes) => [...codes, alert.code])}
+        acknowledged={accepted}
+        onClose={() => {
+          setSelected(null);
+          setPending([]);
+          setAccepted([]);
+        }}
         onConfirm={() => selected && confirm.mutate(selected.id)}
         onSubmit={() => selected && submit.mutate(selected.id)}
         onDispatch={() => selected && dispatch.mutate(selected.id)}
@@ -391,6 +423,9 @@ function OrderModal({
   onDispatch,
   busy,
   viewerOrganization,
+  alerts,
+  acknowledged,
+  onAcknowledge,
 }: {
   order: PurchaseOrder | null;
   side: "placed" | "received";
@@ -400,9 +435,16 @@ function OrderModal({
   onDispatch: () => void;
   busy: boolean;
   viewerOrganization?: string;
+  alerts: Alert[];
+  acknowledged: string[];
+  onAcknowledge: (alert: Alert) => void;
 }) {
   if (!order) return null;
   const status = STATUS[order.status] ?? STATUS.DRAFT;
+
+  /* An accepted warning drops off the stack, so what is left is exactly
+     what still stands between the depot and confirming. */
+  const outstanding = alerts.filter((a) => !acknowledged.includes(a.code));
 
   // Only the supplier confirms; only the buyer submits. Enforced in the
   // service too — this just avoids offering an action that will refuse.
@@ -451,6 +493,13 @@ function OrderModal({
       <div className="mb-4">
         <StatusDot tone={status.tone}>{status.label}</StatusDot>
       </div>
+
+      {/* Above the control they block, never floating. */}
+      <AlertStack
+        alerts={outstanding}
+        onAcknowledge={onAcknowledge}
+        className="mb-4"
+      />
 
       <DetailList
         rows={[
