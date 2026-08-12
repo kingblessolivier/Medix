@@ -38,6 +38,7 @@ from inventory.models import (
 # Movements that reduce stock. Used to validate sign against kind.
 OUTBOUND = {
     MovementKind.SALE,
+    MovementKind.WHOLESALE_DISPATCH,
     MovementKind.TRANSFER_OUT,
     MovementKind.DISPOSAL,
     MovementKind.EXPIRY_WRITE_OFF,
@@ -49,6 +50,16 @@ INBOUND = {
     MovementKind.PURCHASE_RECEIPT,
     MovementKind.SALE_RETURN,
     MovementKind.TRANSFER_IN,
+}
+
+# Kinds where direction is genuinely the caller's to state: a stock-take
+# adjustment goes either way, and the status transitions move a quantity
+# between statuses rather than in or out.
+CALLER_SIGNED = {
+    MovementKind.ADJUSTMENT,
+    MovementKind.QUARANTINE,
+    MovementKind.RELEASE,
+    MovementKind.RECALL,
 }
 
 
@@ -107,10 +118,21 @@ def post_movement(
         raise DomainError("Quantity cannot be zero.", code="zero_quantity")
 
     # Sign is derived from the kind, not trusted from the caller.
+    #
+    # An unclassified kind is refused rather than defaulted. Falling
+    # through used to keep the caller's positive sign, so adding a kind
+    # and forgetting to classify it silently *created* stock — which is
+    # exactly what WHOLESALE_DISPATCH did on its first run.
     if kind in OUTBOUND:
         base = -abs(base)
     elif kind in INBOUND:
         base = abs(base)
+    elif kind not in CALLER_SIGNED:
+        raise DomainError(
+            f"Movement kind {kind} is not classified as inbound, outbound "
+            "or caller-signed. Classify it in inventory.services.",
+            code="unclassified_movement_kind",
+        )
 
     if base > 0:
         _guard_cold_chain(batch, location)

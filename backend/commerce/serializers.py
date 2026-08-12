@@ -9,6 +9,8 @@ from commerce.models import (
     GoodsReceiptLine,
     PurchaseOrder,
     PurchaseOrderLine,
+    Shipment,
+    ShipmentLine,
     TradingRelationship,
     VendorListing,
 )
@@ -105,6 +107,7 @@ class PurchaseOrderLineSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     uom_code = serializers.CharField(source="uom.code", read_only=True)
     outstanding_base = serializers.IntegerField(read_only=True)
+    undispatched_base = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = PurchaseOrderLine
@@ -119,6 +122,8 @@ class PurchaseOrderLineSerializer(serializers.ModelSerializer):
             "line_total",
             "received_base",
             "outstanding_base",
+            "dispatched_base",
+            "undispatched_base",
         ]
 
 
@@ -147,6 +152,52 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "created_at",
             "lines",
         ]
+
+
+class ShipmentLineSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    uom_code = serializers.CharField(source="uom.code", read_only=True)
+
+    class Meta:
+        model = ShipmentLine
+        fields = [
+            "id",
+            "order_line",
+            "product",
+            "product_name",
+            "uom_code",
+            "quantity_base",
+            "batch_number",
+            "expiry_date",
+        ]
+
+
+class ShipmentSerializer(serializers.ModelSerializer):
+    """The delivery note. What the receiver checks the cartons against."""
+
+    lines = ShipmentLineSerializer(many=True, read_only=True)
+    order_number = serializers.CharField(source="order.number", read_only=True)
+    from_location_name = serializers.CharField(source="from_location.name", read_only=True)
+
+    class Meta:
+        model = Shipment
+        fields = [
+            "id",
+            "number",
+            "status",
+            "order",
+            "order_number",
+            "from_location",
+            "from_location_name",
+            "carrier",
+            "dispatched_at",
+            "lines",
+        ]
+
+
+class DispatchSerializer(serializers.Serializer):
+    from_location = serializers.UUIDField()
+    carrier = serializers.CharField(max_length=120, required=False, allow_blank=True)
 
 
 class StartOrderSerializer(serializers.Serializer):

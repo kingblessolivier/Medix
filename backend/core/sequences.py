@@ -20,6 +20,7 @@ PREFIXES = {
     "SALE": "SAL",
     "PURCHASE_ORDER": "PO",
     "GOODS_RECEIPT": "GRN",
+    "DELIVERY_NOTE": "DN",
     "INVOICE": "INV",
     "CREDIT_NOTE": "CN",
     "IMPORT_REQUEST": "IR",

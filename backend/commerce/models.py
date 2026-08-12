@@ -115,6 +115,8 @@ class PurchaseOrderStatus(models.TextChoices):
     DRAFT = "DRAFT", "Draft"
     SUBMITTED = "SUBMITTED", "Submitted"
     CONFIRMED = "CONFIRMED", "Confirmed"
+    PARTIALLY_DISPATCHED = "PARTIALLY_DISPATCHED", "Partially dispatched"
+    DISPATCHED = "DISPATCHED", "Dispatched"
     PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED", "Partially received"
     RECEIVED = "RECEIVED", "Received"
     CANCELLED = "CANCELLED", "Cancelled"
@@ -178,6 +180,9 @@ class PurchaseOrderLine(BaseModel):
 
     #: Running tally, so a partial delivery is visible without recomputing.
     received_base = models.BigIntegerField(default=0)
+    #: What the supplier has actually shipped. Diverges from received_base
+    #: whenever goods are in transit or a delivery arrives short.
+    dispatched_base = models.BigIntegerField(default=0)
 
     class Meta:
         db_table = "commerce_purchase_order_line"
@@ -185,6 +190,9 @@ class PurchaseOrderLine(BaseModel):
             models.CheckConstraint(condition=models.Q(quantity__gt=0), name="ck_po_line_qty"),
             models.CheckConstraint(
                 condition=models.Q(received_base__gte=0), name="ck_po_received_nonneg"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(dispatched_base__gte=0), name="ck_po_dispatched_nonneg"
             ),
         ]
 
@@ -194,6 +202,11 @@ class PurchaseOrderLine(BaseModel):
     @property
     def outstanding_base(self) -> int:
         return max(0, self.quantity_base - self.received_base)
+
+    @property
+    def undispatched_base(self) -> int:
+        """Ordered but not yet shipped — what the supplier still owes."""
+        return max(0, self.quantity_base - self.dispatched_base)
 
 
 # --------------------------------------------------------------------------
@@ -311,3 +324,87 @@ class GoodsReceiptLine(BaseModel):
     @property
     def is_short(self) -> bool:
         return self.ordered > 0 and self.received < self.ordered
+
+
+# --------------------------------------------------------------------------
+# Dispatch
+# --------------------------------------------------------------------------
+
+
+class ShipmentStatus(models.TextChoices):
+    DRAFT = "DRAFT", "Draft"
+    DISPATCHED = "DISPATCHED", "Dispatched"
+
+
+class Shipment(TenantModel):
+    """The supplier's delivery note.
+
+    Dispatch is the other half of receiving. Without it the buyer's ledger
+    gains stock that never left the supplier's, so the same goods exist
+    twice on the platform and every marketplace stock figure overstates.
+
+    Owned by the *supplier* — this is their document, raised against the
+    buyer's order.
+    """
+
+    number = models.CharField(max_length=30, blank=True)
+    order = models.ForeignKey(
+        PurchaseOrder, on_delete=models.PROTECT, related_name="shipments"
+    )
+    from_location = models.ForeignKey(
+        "inventory.Location", on_delete=models.PROTECT, related_name="+"
+    )
+    status = models.CharField(
+        max_length=20, choices=ShipmentStatus.choices, default=ShipmentStatus.DRAFT
+    )
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    carrier = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        db_table = "commerce_shipment"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "number"],
+                condition=~models.Q(number=""),
+                name="uq_shipment_number",
+            ),
+        ]
+        indexes = [models.Index(fields=["organization", "status"])]
+
+    def __str__(self) -> str:
+        return self.number or f"draft shipment {self.id}"
+
+
+class ShipmentLine(BaseModel):
+    """One batch actually picked.
+
+    A single order line can span several batches — FEFO does not care that
+    the buyer ordered a round number — so this is per batch, not per order
+    line. The batch number and expiry recorded here are what the receiving
+    pharmacy checks the physical cartons against.
+    """
+
+    shipment = models.ForeignKey(Shipment, on_delete=models.CASCADE, related_name="lines")
+    order_line = models.ForeignKey(
+        PurchaseOrderLine, on_delete=models.PROTECT, related_name="dispatches"
+    )
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="+")
+    uom = models.ForeignKey(UnitOfMeasure, on_delete=models.PROTECT, related_name="+")
+
+    quantity_base = models.BigIntegerField()
+
+    batch = models.ForeignKey("inventory.Batch", on_delete=models.PROTECT, related_name="+")
+    batch_number = models.CharField(max_length=60)
+    expiry_date = models.DateField()
+
+    class Meta:
+        db_table = "commerce_shipment_line"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(quantity_base__gt=0), name="ck_shipment_line_qty"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product.name} {self.batch_number}"

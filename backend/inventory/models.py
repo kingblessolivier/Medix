@@ -49,6 +49,7 @@ class MovementKind(models.TextChoices):
     OPENING = "OPENING", "Opening balance"
     PURCHASE_RECEIPT = "PURCHASE_RECEIPT", "Purchase receipt"
     SALE = "SALE", "Sale"
+    WHOLESALE_DISPATCH = "WHOLESALE_DISPATCH", "Wholesale dispatch"
     SALE_RETURN = "SALE_RETURN", "Sale return"
     TRANSFER_OUT = "TRANSFER_OUT", "Transfer out"
     TRANSFER_IN = "TRANSFER_IN", "Transfer in"

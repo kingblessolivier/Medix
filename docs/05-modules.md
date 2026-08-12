@@ -135,6 +135,22 @@ Search → not available → Request import
 
 ---
 
+## 4b. Dispatch
+
+The supplier's half of a trade, and the reason stock stays honest across two organizations.
+
+Receiving on its own credits the buyer with goods that never left the seller — the same cartons then exist twice on the platform and every marketplace stock figure overstates. `dispatch_order()` closes that loop: it issues the goods out of the supplier's ledger as `WHOLESALE_DISPATCH` and raises a **delivery note** (`Shipment`, `DN-YYYY-NNNNN`).
+
+**Picking is FEFO**, so one order line routinely spans several batches — the buyer ordered a round number, the shelf does not hold one. Each batch becomes its own delivery-note line carrying batch number and expiry. Those are what the receiving pharmacy checks the physical cartons against, and what pre-fills their GRN.
+
+**A short pick is not an error.** The supplier ships what they hold; the order goes `PARTIALLY_DISPATCHED` and the shortfall is still owed. Only the supplier may dispatch, and only against a confirmed order.
+
+`WHOLESALE_DISPATCH` is deliberately not `SALE`. An organization holding both licences sells over a counter *and* ships to other pharmacies; collapsing the two would make counter revenue and trade revenue inseparable in analytics.
+
+> Still to come here: transport temperature log and carrier tracking.
+
+---
+
 ## 5. Receiving
 
 GRN against PO. Ordered 500, received 480 produces a **discrepancy report**, never a silently edited number.

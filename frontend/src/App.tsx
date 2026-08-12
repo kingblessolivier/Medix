@@ -39,7 +39,12 @@ export default function App() {
     queryFn: () => api.locations(),
     enabled: signedIn,
   });
-  const mainLocation = locations.data?.results.find((l) => l.code === "MAIN")?.id;
+  /* The working location. "MAIN" is the retail convention; a wholesale
+     pharmacy's is "DEPOT", and nothing guarantees either exists — so fall
+     back to whatever this organization actually has. Matching on the code
+     alone left every wholesale action sending no location at all. */
+  const sites = locations.data?.results ?? [];
+  const mainLocation = (sites.find((l) => l.code === "MAIN") ?? sites[0])?.id;
 
   if (!signedIn) {
     return (
@@ -86,7 +91,7 @@ export default function App() {
         ) : active === "marketplace" ? (
           <MarketplaceScreen locationId={mainLocation ?? null} />
         ) : active === "orders" ? (
-          <OrdersScreen canSupply={canSupply} />
+          <OrdersScreen canSupply={canSupply} locationId={mainLocation ?? null} />
         ) : active === "receiving" ? (
           <ReceivingScreen locationId={mainLocation ?? null} />
         ) : (

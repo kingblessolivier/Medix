@@ -31,10 +31,12 @@ from commerce.models import (
 from commerce.serializers import (
     AddOrderLineSerializer,
     AddReceiptLineSerializer,
+    DispatchSerializer,
     GoodsReceiptSerializer,
     MarketplaceRowSerializer,
     PublishListingSerializer,
     PurchaseOrderSerializer,
+    ShipmentSerializer,
     StartOrderSerializer,
     StartReceiptSerializer,
     TradingRelationshipSerializer,
@@ -273,6 +275,39 @@ class PurchaseOrderViewSet(
         """Supplier accepts. Only the supplier may."""
         order = services.confirm_order(order=self.get_object(), performed_by=request.user)
         return Response(PurchaseOrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"])
+    def dispatch_order(self, request, pk=None):
+        """Ship what is outstanding. Only the supplier may.
+
+        Named `dispatch_order` rather than `dispatch` because `dispatch`
+        is View.dispatch — overriding it would break request routing.
+        """
+        payload = DispatchSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        from_location = get_object_or_404(
+            Location.objects.filter(organization=request.user.organization),
+            pk=payload.validated_data["from_location"],
+        )
+        shipment = services.dispatch_order(
+            order=self.get_object(),
+            from_location=from_location,
+            performed_by=request.user,
+            carrier=payload.validated_data.get("carrier", ""),
+        )
+        return Response(ShipmentSerializer(shipment).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], url_path="shipments")
+    def shipments(self, request, pk=None):
+        """Delivery notes against this order — the buyer reads these too."""
+        order = self.get_object()
+        return Response(
+            ShipmentSerializer(
+                order.shipments.prefetch_related("lines__product", "lines__uom").all(),
+                many=True,
+            ).data
+        )
 
     @action(detail=False, methods=["get"], url_path="fulfilment")
     def fulfilment(self, request):

@@ -9,6 +9,7 @@ See docs/05-modules.md §3–§5.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 
 from django.db import transaction
@@ -18,9 +19,9 @@ from django.utils import timezone
 from catalog.models import Product, UnitOfMeasure
 from core import sequences
 from core.capabilities import Capability, require_capability
-from core.exceptions import DomainError
+from core.exceptions import DomainError, InsufficientStock
 from core.models import Organization, User
-from core.quantity import Quantity
+from core.quantity import Quantity, from_base
 from commerce.models import (
     Availability,
     GoodsReceipt,
@@ -29,6 +30,9 @@ from commerce.models import (
     PurchaseOrder,
     PurchaseOrderLine,
     PurchaseOrderStatus,
+    Shipment,
+    ShipmentLine,
+    ShipmentStatus,
     TradingRelationship,
     VendorListing,
 )
@@ -296,6 +300,141 @@ def confirm_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
     order.modified_by = performed_by
     order.save(update_fields=["status", "confirmed_at", "modified_by", "modified_at"])
     return order
+
+
+# --------------------------------------------------------------------------
+# Dispatch
+# --------------------------------------------------------------------------
+
+
+def _dispatch_key(shipment_id, line_id) -> str:
+    digest = hashlib.blake2s(f"{shipment_id}:{line_id}".encode(), digest_size=16).hexdigest()
+    return f"dispatch:{digest}"
+
+
+class NothingToDispatch(DomainError):
+    default_code = "nothing_to_dispatch"
+    default_detail = "Every line on this order has already been shipped."
+
+
+@transaction.atomic
+def dispatch_order(
+    *,
+    order: PurchaseOrder,
+    from_location: Location,
+    performed_by: User,
+    carrier: str = "",
+) -> Shipment:
+    """Ship what is outstanding, and take it out of the supplier's ledger.
+
+    This is the half that makes cross-organization trade honest. Receiving
+    alone credits the buyer with stock that never left the seller, so the
+    same cartons exist twice on the platform and every marketplace stock
+    figure overstates.
+
+    Picking is FEFO, so one order line can span several batches; each
+    batch becomes its own delivery-note line. Those batch numbers and
+    expiries are what the receiving pharmacy checks the cartons against,
+    which is also why the buyer no longer has to type them from scratch.
+
+    Short picks are allowed and are not an error: the supplier ships what
+    they hold, the order stays partially dispatched, and the shortfall is
+    still owed.
+    """
+    if order.supplier_id != performed_by.organization_id:
+        raise DomainError("Only the supplier can dispatch an order.", code="not_supplier")
+    if order.status not in (
+        PurchaseOrderStatus.CONFIRMED,
+        PurchaseOrderStatus.PARTIALLY_DISPATCHED,
+        # Fully dispatched is allowed through so the outstanding check
+        # below gives the precise reason — "already shipped" tells the
+        # picker what happened; "not confirmed" would mislead them.
+        PurchaseOrderStatus.DISPATCHED,
+    ):
+        raise DomainError(
+            "Only a confirmed order can be dispatched.", code="order_not_confirmed"
+        )
+    if from_location.organization_id != order.supplier_id:
+        raise DomainError("That location belongs to another organization.", code="wrong_location")
+
+    outstanding = [line for line in order.lines.select_related("product", "uom") if line.undispatched_base > 0]
+    if not outstanding:
+        raise NothingToDispatch()
+
+    shipment = Shipment.objects.create(
+        organization=order.supplier,
+        order=order,
+        from_location=from_location,
+        carrier=carrier,
+        created_by=performed_by,
+    )
+
+    shipped_anything = False
+    for line in outstanding:
+        available = inventory.balance_for(
+            organization=order.supplier, product=line.product, location=from_location
+        )
+        take = min(line.undispatched_base, available)
+        if take <= 0:
+            continue
+
+        results = inventory.issue_fefo(
+            organization=order.supplier,
+            product=line.product,
+            location=from_location,
+            quantity=from_base(take, line.product.base_uom),
+            kind=MovementKind.WHOLESALE_DISPATCH,
+            performed_by=performed_by,
+            reference=order.number,
+            # Re-posting a dispatch must not issue the goods twice. Two
+            # raw UUIDs overflow the 64-char key column, so the pair is
+            # hashed — deterministic, and short enough to store.
+            idempotency_key=_dispatch_key(shipment.id, line.id),
+        )
+
+        for result in results:
+            movement = result.movement
+            ShipmentLine.objects.create(
+                shipment=shipment,
+                order_line=line,
+                product=line.product,
+                uom=line.uom,
+                quantity_base=abs(movement.quantity_base),
+                batch=movement.batch,
+                batch_number=movement.batch.batch_number,
+                expiry_date=movement.batch.expiry_date,
+            )
+
+        line.dispatched_base += take
+        line.save(update_fields=["dispatched_base"])
+        shipped_anything = True
+
+    if not shipped_anything:
+        raise InsufficientStock(
+            "No stock on hand for any line on this order.",
+            code="no_stock_to_dispatch",
+        )
+
+    shipment.number = sequences.next_number(order.supplier, "DELIVERY_NOTE")
+    shipment.status = ShipmentStatus.DISPATCHED
+    shipment.dispatched_at = timezone.now()
+    shipment.save(update_fields=["number", "status", "dispatched_at", "modified_at"])
+
+    _update_dispatch_progress(order)
+    return shipment
+
+
+def _update_dispatch_progress(order: PurchaseOrder) -> None:
+    # Query the lines rather than reading order.lines.all(): the viewset
+    # prefetches that relation, so the cached rows still carry the
+    # pre-dispatch tallies and a fully shipped order would be left
+    # PARTIALLY_DISPATCHED forever.
+    lines = list(PurchaseOrderLine.objects.filter(order=order))
+    if all(line.undispatched_base == 0 for line in lines):
+        order.status = PurchaseOrderStatus.DISPATCHED
+    else:
+        order.status = PurchaseOrderStatus.PARTIALLY_DISPATCHED
+    order.save(update_fields=["status", "modified_at"])
 
 
 # --------------------------------------------------------------------------

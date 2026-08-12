@@ -301,6 +301,8 @@ export type OrderLine = {
   line_total: number;
   received_base: number;
   outstanding_base: number;
+  dispatched_base: number;
+  undispatched_base: number;
 };
 
 export type PurchaseOrder = {
@@ -318,6 +320,31 @@ export type PurchaseOrder = {
   confirmed_at: string | null;
   created_at: string;
   lines: OrderLine[];
+};
+
+export type ShipmentLine = {
+  id: string;
+  order_line: string;
+  product: string;
+  product_name: string;
+  uom_code: string;
+  quantity_base: number;
+  batch_number: string;
+  expiry_date: string;
+};
+
+/** The supplier's delivery note — what the receiver checks cartons against. */
+export type Shipment = {
+  id: string;
+  number: string;
+  status: string;
+  order: string;
+  order_number: string;
+  from_location: string;
+  from_location_name: string;
+  carrier: string;
+  dispatched_at: string | null;
+  lines: ShipmentLine[];
 };
 
 export type ReceiptLine = {
@@ -421,6 +448,10 @@ export const api = {
     request<PurchaseOrder>(`/purchase-orders/${id}/submit/`, { method: "POST", body: {} }),
   confirmOrder: (id: string) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/confirm/`, { method: "POST", body: {} }),
+
+  dispatchOrder: (id: string, body: { from_location: string; carrier?: string }) =>
+    request<Shipment>(`/purchase-orders/${id}/dispatch_order/`, { method: "POST", body }),
+  shipments: (id: string) => request<Shipment[]>(`/purchase-orders/${id}/shipments/`),
 
   receipts: () => request<Paginated<GoodsReceipt>>("/goods-receipts/"),
   startReceipt: (body: { location: string; order?: string; supplier?: string }) =>

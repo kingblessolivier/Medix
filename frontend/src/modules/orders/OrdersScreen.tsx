@@ -8,10 +8,10 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleCheck, List, Send, Truck } from "lucide-react";
+import { Check, CircleCheck, List, PackageCheck, Send, Truck } from "lucide-react";
 import { useState } from "react";
 
-import { api, type OrderLine, type PurchaseOrder } from "@/lib/api";
+import { ApiFailure, api, type OrderLine, type PurchaseOrder } from "@/lib/api";
 import {
   DataTable,
   DataToolbar,
@@ -22,6 +22,7 @@ import {
   type TableTab,
 } from "@/components/data/DataTable";
 import {
+  Banner,
   Button,
   ErrorState,
   PageHeader,
@@ -38,6 +39,8 @@ const STATUS: Record<string, { tone: Tone; label: string }> = {
   DRAFT: { tone: "neutral", label: "Draft" },
   SUBMITTED: { tone: "warn", label: "Awaiting confirmation" },
   CONFIRMED: { tone: "info", label: "Confirmed" },
+  PARTIALLY_DISPATCHED: { tone: "warn", label: "Part shipped" },
+  DISPATCHED: { tone: "info", label: "Shipped" },
   PARTIALLY_RECEIVED: { tone: "warn", label: "Part received" },
   RECEIVED: { tone: "ok", label: "Received" },
   CANCELLED: { tone: "neutral", label: "Cancelled" },
@@ -79,11 +82,23 @@ const LINE_COLUMNS: Column<OrderLine>[] = [
 const VIEWS: { id: string; label: string; icon: typeof List; match?: string[] }[] = [
   { id: "all", label: "All orders", icon: List },
   { id: "open", label: "Awaiting", icon: Truck, match: ["DRAFT", "SUBMITTED"] },
-  { id: "confirmed", label: "Confirmed", icon: CircleCheck, match: ["CONFIRMED"] },
+  {
+    id: "confirmed",
+    label: "To ship",
+    icon: CircleCheck,
+    match: ["CONFIRMED", "PARTIALLY_DISPATCHED"],
+  },
+  { id: "shipped", label: "Shipped", icon: Truck, match: ["DISPATCHED"] },
   { id: "closed", label: "Received", icon: Check, match: ["RECEIVED", "PARTIALLY_RECEIVED"] },
 ];
 
-export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
+export function OrdersScreen({
+  canSupply,
+  locationId,
+}: {
+  canSupply: boolean;
+  locationId: string | null;
+}) {
   const queryClient = useQueryClient();
   const [side, setSide] = useState<"placed" | "received">(canSupply ? "received" : "placed");
   const [density] = useState<Density>("compact");
@@ -91,6 +106,7 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
   const [view, setView] = useState("all");
   const [filter, setFilter] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [failure, setFailure] = useState("");
 
   const orders = useQuery({
     queryKey: ["orders", side],
@@ -139,6 +155,13 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
 
   const term = filter.trim().toLowerCase();
   const chosenView = VIEWS.find((v) => v.id === view);
+  const dispatch = useMutation({
+    mutationFn: (id: string) => api.dispatchOrder(id, { from_location: locationId! }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["orders"] }),
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Couldn't dispatch."),
+  });
+
   const rows = visible
     .filter((o) => !chosenView?.match || chosenView.match.includes(o.status))
     .filter(
@@ -152,6 +175,11 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
      removes. Only the supplier may confirm, and only what is submitted. */
   const confirmable = (o: PurchaseOrder) => side === "received" && o.status === "SUBMITTED";
 
+  /* Dispatch is what takes the goods out of the supplier's ledger.
+     Without it the buyer gains stock that never left here. */
+  const shippable = (o: PurchaseOrder) =>
+    side === "received" && ["CONFIRMED", "PARTIALLY_DISPATCHED"].includes(o.status);
+
   const rowActions: RowAction<PurchaseOrder>[] = [
     { label: "Open", onSelect: setSelected },
     {
@@ -159,6 +187,15 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
       onSelect: (o) => (side === "received" ? confirm.mutate(o.id) : submit.mutate(o.id)),
       disabled: (o) => (side === "received" ? !confirmable(o) : o.status !== "DRAFT"),
     },
+    ...(side === "received"
+      ? [
+          {
+            label: "Dispatch",
+            onSelect: (o: PurchaseOrder) => dispatch.mutate(o.id),
+            disabled: (o: PurchaseOrder) => !shippable(o) || !locationId,
+          },
+        ]
+      : []),
   ];
 
   const columns: Column<PurchaseOrder>[] = [
@@ -230,6 +267,12 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
         </div>
       )}
 
+      {failure && (
+        <Banner tone="bad" className="mb-4">
+          {failure}
+        </Banner>
+      )}
+
       <TableTabs tabs={tabs} active={view} onChange={setView} />
 
       <DataToolbar
@@ -281,7 +324,8 @@ export function OrdersScreen({ canSupply }: { canSupply: boolean }) {
         onClose={() => setSelected(null)}
         onConfirm={() => selected && confirm.mutate(selected.id)}
         onSubmit={() => selected && submit.mutate(selected.id)}
-        busy={confirm.isPending || submit.isPending}
+        onDispatch={() => selected && dispatch.mutate(selected.id)}
+        busy={confirm.isPending || submit.isPending || dispatch.isPending}
       />
     </>
   );
@@ -338,6 +382,7 @@ function OrderDrawer({
   onClose,
   onConfirm,
   onSubmit,
+  onDispatch,
   busy,
 }: {
   order: PurchaseOrder | null;
@@ -345,6 +390,7 @@ function OrderDrawer({
   onClose: () => void;
   onConfirm: () => void;
   onSubmit: () => void;
+  onDispatch: () => void;
   busy: boolean;
 }) {
   if (!order) return null;
@@ -353,7 +399,18 @@ function OrderDrawer({
   // Only the supplier confirms; only the buyer submits. Enforced in the
   // service too — this just avoids offering an action that will refuse.
   const action =
-    side === "received" && order.status === "SUBMITTED" ? (
+    side === "received" &&
+    ["CONFIRMED", "PARTIALLY_DISPATCHED"].includes(order.status) ? (
+      <Button
+        variant="primary"
+        className="w-full"
+        icon={<PackageCheck size={16} strokeWidth={1.9} />}
+        loading={busy}
+        onClick={onDispatch}
+      >
+        Dispatch order
+      </Button>
+    ) : side === "received" && order.status === "SUBMITTED" ? (
       <Button
         variant="primary"
         className="w-full"

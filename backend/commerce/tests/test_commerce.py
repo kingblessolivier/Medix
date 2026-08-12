@@ -13,8 +13,10 @@ from catalog.models import LegalStatus
 from commerce import services
 from commerce.models import (
     Availability,
+    PurchaseOrder,
     GoodsReceiptStatus,
     PurchaseOrderStatus,
+    ShipmentStatus,
     TradingRelationship,
     VendorListing,
 )
@@ -666,3 +668,218 @@ class TestCatalogMirroring:
             ).id
             == own.id
         )
+
+
+class TestDispatch:
+    """The other half of receiving.
+
+    Receiving alone credits the buyer with stock that never left the
+    seller. These tests are about the pair of ledgers agreeing.
+    """
+
+    def _confirmed_order(self, market, quantity=10):
+        listing = services.publish_listing(
+            organization=market["wholesale"],
+            product=market["product"],
+            price=28000,
+            price_uom=uom(market["product"], "PACK"),
+            moq=1,
+        )
+        TradingRelationship.objects.create(
+            organization=market["wholesale"],
+            customer=market["retail"],
+            is_verified=True,
+            verified_at=timezone.now(),
+        )
+        order = services.start_order(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+        services.add_order_line(order=order, listing=listing, quantity=quantity)
+        services.submit_order(order=order, performed_by=market["buyer"])
+        services.confirm_order(order=order, performed_by=market["seller"])
+        return order
+
+    def test_dispatch_removes_stock_from_the_supplier(self, market):
+        order = self._confirmed_order(market, quantity=5)
+        before = inventory.balance_for(
+            organization=market["wholesale"], product=market["product"]
+        )
+
+        services.dispatch_order(
+            order=order, from_location=market["depot"], performed_by=market["seller"]
+        )
+
+        after = inventory.balance_for(
+            organization=market["wholesale"], product=market["product"]
+        )
+        # 5 packs of 100 capsules.
+        assert before - after == 500
+
+    def test_dispatch_records_the_batch_it_picked(self, market):
+        """The delivery note is what the receiver checks the cartons against."""
+        order = self._confirmed_order(market, quantity=5)
+        shipment = services.dispatch_order(
+            order=order, from_location=market["depot"], performed_by=market["seller"]
+        )
+
+        assert shipment.number.startswith("DN-")
+        assert shipment.status == ShipmentStatus.DISPATCHED
+        line = shipment.lines.get()
+        assert line.batch_number == market["batch"].batch_number
+        assert line.expiry_date == market["batch"].expiry_date
+        assert line.quantity_base == 500
+
+    def test_carrier_is_recorded(self, market):
+        """Who is carrying it is part of the delivery note, not decoration."""
+        order = self._confirmed_order(market, quantity=5)
+        shipment = services.dispatch_order(
+            order=order,
+            from_location=market["depot"],
+            performed_by=market["seller"],
+            carrier="Kigali Express",
+        )
+        shipment.refresh_from_db()
+        assert shipment.carrier == "Kigali Express"
+
+    def test_only_the_supplier_may_dispatch(self, market):
+        order = self._confirmed_order(market)
+        with pytest.raises(Exception, match="supplier"):
+            services.dispatch_order(
+                order=order, from_location=market["depot"], performed_by=market["buyer"]
+            )
+
+    def test_unconfirmed_order_cannot_dispatch(self, market):
+        """Goods must not leave on an order the supplier never accepted."""
+        listing = services.publish_listing(
+            organization=market["wholesale"],
+            product=market["product"],
+            price=28000,
+            price_uom=uom(market["product"], "PACK"),
+            moq=1,
+        )
+        order = services.start_order(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+        services.add_order_line(order=order, listing=listing, quantity=5)
+        with pytest.raises(Exception, match="confirmed"):
+            services.dispatch_order(
+                order=order, from_location=market["depot"], performed_by=market["seller"]
+            )
+
+    def test_short_pick_leaves_the_rest_owed(self, market):
+        """A supplier ships what they hold; the shortfall stays outstanding."""
+        # Depot holds 20 packs; order 30.
+        order = self._confirmed_order(market, quantity=30)
+        shipment = services.dispatch_order(
+            order=order, from_location=market["depot"], performed_by=market["seller"]
+        )
+
+        order.refresh_from_db()
+        line = order.lines.get()
+        assert line.dispatched_base == 2000
+        assert line.undispatched_base == 1000
+        assert order.status == PurchaseOrderStatus.PARTIALLY_DISPATCHED
+        assert sum(l.quantity_base for l in shipment.lines.all()) == 2000
+
+    def test_full_dispatch_closes_the_order(self, market):
+        order = self._confirmed_order(market, quantity=20)
+        services.dispatch_order(
+            order=order, from_location=market["depot"], performed_by=market["seller"]
+        )
+        order.refresh_from_db()
+        assert order.status == PurchaseOrderStatus.DISPATCHED
+        assert order.lines.get().undispatched_base == 0
+
+    def test_full_dispatch_closes_a_prefetched_order(self, market):
+        """The viewset prefetches lines; the service must not trust that.
+
+        Reading order.lines.all() after updating the tallies returns the
+        cached pre-dispatch rows, which left a fully shipped order stuck
+        on PARTIALLY_DISPATCHED. Fetched here exactly as the viewset does.
+        """
+        order = self._confirmed_order(market, quantity=20)
+        prefetched = (
+            PurchaseOrder.objects.prefetch_related("lines__product", "lines__uom")
+            .get(pk=order.pk)
+        )
+        # Warm the prefetch cache, as serializing the order would.
+        list(prefetched.lines.all())
+
+        services.dispatch_order(
+            order=prefetched, from_location=market["depot"], performed_by=market["seller"]
+        )
+
+        prefetched.refresh_from_db()
+        assert prefetched.status == PurchaseOrderStatus.DISPATCHED
+
+    def test_nothing_left_to_dispatch_is_refused(self, market):
+        order = self._confirmed_order(market, quantity=20)
+        services.dispatch_order(
+            order=order, from_location=market["depot"], performed_by=market["seller"]
+        )
+        with pytest.raises(services.NothingToDispatch):
+            services.dispatch_order(
+                order=order, from_location=market["depot"], performed_by=market["seller"]
+            )
+
+    def test_stock_is_conserved_across_both_ledgers(self, market):
+        """The point of the whole exercise.
+
+        What leaves the supplier must equal what the buyer receives. If
+        these diverge the platform is inventing or destroying medicine.
+        """
+        order = self._confirmed_order(market, quantity=5)
+        supplier_before = inventory.balance_for(
+            organization=market["wholesale"], product=market["product"]
+        )
+        buyer_before = inventory.balance_for(
+            organization=market["retail"], product=market["product"]
+        )
+
+        shipment = services.dispatch_order(
+            order=order, from_location=market["depot"], performed_by=market["seller"]
+        )
+
+        # The buyer receives exactly what the delivery note says.
+        receipt = services.start_receipt(
+            organization=market["retail"],
+            location=market["store"],
+            order=order,
+            performed_by=market["buyer"],
+        )
+        from catalog import services as catalog
+
+        mirrored = catalog.mirror_product(
+            organization=market["retail"],
+            source=market["product"],
+            performed_by=market["buyer"],
+        )
+        for sl in shipment.lines.all():
+            services.add_receipt_line(
+                receipt=receipt,
+                product=mirrored,
+                uom=uom(mirrored, "PACK"),
+                received=sl.quantity_base // 100,
+                batch_number=sl.batch_number,
+                expiry_date=sl.expiry_date,
+                order_line=sl.order_line,
+            )
+        services.post_receipt(receipt=receipt, performed_by=market["buyer"])
+
+        supplier_after = inventory.balance_for(
+            organization=market["wholesale"], product=market["product"]
+        )
+        buyer_after = inventory.balance_for(
+            organization=market["retail"], product=mirrored
+        )
+
+        left = supplier_before - supplier_after
+        arrived = buyer_after - buyer_before
+        assert left == 500
+        assert arrived == left
