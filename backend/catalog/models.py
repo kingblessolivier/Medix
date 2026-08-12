@@ -321,6 +321,42 @@ class UnitOfMeasure(TenantModel):
             raise ValidationError({"factor_to_base": "The base unit must have factor 1."})
 
 
+class ProductImage(TenantModel):
+    """A picture of the actual pack.
+
+    A buyer ordering from a screen cannot pick the box up. The image is
+    how they confirm the presentation is the one they stock — same
+    strength, same pack count, same manufacturer's artwork — before
+    committing to a carton of it.
+
+    That makes it verification, not decoration, which is why `alt` is
+    required: a description a screen reader can speak is the same
+    information the image carries, and a product with neither is a
+    product nobody can check.
+    """
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images")
+    image = models.ImageField(upload_to="products/%Y/%m/")
+    alt = models.CharField(max_length=200, help_text="What the picture shows.")
+    #: The one used in lists and cards. Exactly one per product.
+    is_primary = models.BooleanField(default=False)
+    position = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = "catalog_product_image"
+        ordering = ["position", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product"],
+                condition=models.Q(is_primary=True),
+                name="uq_one_primary_image",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product.name} image"
+
+
 class ProductRegistration(TenantModel):
     """Rwanda FDA registration.
 

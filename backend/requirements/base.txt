@@ -10,3 +10,5 @@ redis==5.2.1
 django-redis==5.4.0
 uuid-utils==0.10.0
 python-dateutil==2.9.0.post0
+# Product images: a buyer verifies the pack before ordering a carton.
+Pillow==12.3.0

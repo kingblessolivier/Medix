@@ -18,13 +18,23 @@ from django.db import transaction
 
 from catalog.models import (
     Category,
+    Manufacturer,
     Product,
     ProductRegistration,
     ProductType,
     RegistrationStatus,
     UnitOfMeasure,
 )
-from catalog.reference import CATALOGUE, CATEGORIES
+from catalog.reference import (
+    CATALOGUE,
+    CATEGORIES,
+    MANUFACTURERS,
+    form_for,
+    manufacturer_for,
+    route_for,
+    storage_for,
+    strength_for,
+)
 from core.models import Branch, LicenceKind, Organization, PremisesLicence, User
 from core.quantity import Quantity
 from core.tenancy import organization_scope
@@ -79,6 +89,14 @@ class Command(BaseCommand):
                 name: Category.objects.get_or_create(organization=org, name=name)[0]
                 for name in CATEGORIES
             }
+            houses = {
+                house: Manufacturer.objects.get_or_create(
+                    organization=org,
+                    name=house,
+                    defaults={"country_of_origin": country, "gmp_certified": gmp},
+                )[0]
+                for house, country, gmp in MANUFACTURERS
+            }
             types: dict[str, ProductType] = {}
 
             for item in CATALOGUE:
@@ -101,6 +119,13 @@ class Command(BaseCommand):
                         "tax_treatment": item.tax,
                         "cold_chain": item.cold_chain,
                         "gtin": item.gtin,
+                        "dosage_form": form_for(item),
+                        "strength": strength_for(item),
+                        "route": route_for(item),
+                        "manufacturer": houses[manufacturer_for(item)],
+                        "storage_min_c": storage_for(item)[0],
+                        "storage_max_c": storage_for(item)[1],
+                        "light_sensitive": item.kind == "MEDICINE" and item.cold_chain,
                     },
                 )
                 if created:
