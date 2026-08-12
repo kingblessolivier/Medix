@@ -11,6 +11,11 @@ urlpatterns = [
         alerts_views.ProductAlertView.as_view(),
         name="product-alerts",
     ),
+    path(
+        "compliance/extract/",
+        alerts_views.RegulatorExtractView.as_view(),
+        name="regulator-extract",
+    ),
     path("auth/token/", TokenObtainPairView.as_view(), name="token-obtain"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("auth/me/", views.me, name="me"),

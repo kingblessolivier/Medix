@@ -20,7 +20,7 @@ from django.utils import timezone
 from catalog import checks as catalog_checks
 from catalog.models import LegalStatus, Product, UnitOfMeasure
 from commerce import checks, invoicing
-from core import alerts, audit, sequences
+from core import alerts, audit, quotas, sequences
 from core.capabilities import Capability, require_capability
 from core.exceptions import DomainError, InsufficientStock
 from core.models import Organization, PharmacistRegistration, User
@@ -692,6 +692,7 @@ def dispatch_order(
     driver_name: str = "",
     driver_licence: str = "",
     controlled_transfer: PharmacistRegistration | None = None,
+    acknowledged: list[str] | None = None,
 ) -> Shipment:
     """Ship what is outstanding, and take it out of the supplier's ledger.
 
@@ -739,6 +740,32 @@ def dispatch_order(
             f"{controlled[0].product.name} is a controlled drug. "
             "Raise a transfer form first.",
             meta={"products": [line.product.name for line in controlled]},
+        )
+
+    # The regulator caps throughput per schedule per period, so the
+    # consignment about to leave is counted with what already has.
+    # Checking only history lets a depot at its limit ship one more
+    # consignment every time.
+    if controlled:
+        pending: dict[str, int] = {}
+        for line in controlled:
+            pending[line.product.controlled_schedule] = (
+                pending.get(line.product.controlled_schedule, 0)
+                + line.undispatched_base
+            )
+        alerts.enforce(
+            [
+                alert
+                for schedule, quantity in pending.items()
+                for alert in quotas.check(
+                    organization=order.supplier,
+                    schedule=schedule,
+                    pending_base=quantity,
+                )
+            ],
+            organization=order.supplier,
+            performed_by=performed_by,
+            acknowledged=acknowledged or [],
         )
 
     shipment = Shipment.objects.create(

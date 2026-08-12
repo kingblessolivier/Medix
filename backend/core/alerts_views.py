@@ -42,6 +42,39 @@ class AlertView(APIView):
         return Response(summarise(check(organization)))
 
 
+class RegulatorExtractView(APIView):
+    """Everything an inspection asks for, for a dated range.
+
+    Read-only by construction — there is no write path here — and bounded
+    by the range asked for, so two inspectors asking about two periods
+    get two answers rather than one moving one.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from datetime import date
+
+        from core import extracts
+        from core.exceptions import DomainError
+
+        try:
+            start = date.fromisoformat(request.query_params["start"])
+            end = date.fromisoformat(request.query_params["end"])
+        except (KeyError, ValueError):
+            raise DomainError(
+                "Give a start and end date.", code="period_required"
+            )
+        if end < start:
+            raise DomainError("The period ends before it starts.", code="invalid_period")
+
+        return Response(
+            extracts.bundle(
+                organization=request.user.organization, start=start, end=end
+            )
+        )
+
+
 class ProductAlertView(APIView):
     """Everything wrong with one product, for its detail modal."""
 
