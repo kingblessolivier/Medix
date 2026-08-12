@@ -12,6 +12,7 @@ import {
   Bell,
   ChartNoAxesCombined,
   ClipboardList,
+  FileText,
   LayoutDashboard,
   Moon,
   Package,
@@ -24,6 +25,7 @@ import {
   Store,
   Sun,
   Truck,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -73,7 +75,11 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
 
   groups.push({
     label: "Reporting",
-    items: [{ id: "analytics", label: "Analytics", icon: ChartNoAxesCombined }],
+    items: [
+      { id: "analytics", label: "Performance", icon: ChartNoAxesCombined },
+      { id: "finance", label: "Finance", icon: Wallet },
+      { id: "documents", label: "Documents", icon: FileText },
+    ],
   });
   return groups;
 }

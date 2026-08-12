@@ -139,6 +139,30 @@ class PeriodReportView(APIView):
         return Response(report.as_dict())
 
 
+class DashboardView(APIView):
+    """The performance view, in one round trip.
+
+    Four tiles and four charts read the same period, so four requests
+    would let them disagree with each other while a query was in flight.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        query = PeriodQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        data = query.validated_data
+
+        return Response(
+            reports.dashboard(
+                organization=request.user.organization,
+                start=data["start"],
+                end=data["end"],
+                tier=data["tier"],
+            )
+        )
+
+
 class ReceivablesView(APIView):
     permission_classes = [IsAuthenticated]
 

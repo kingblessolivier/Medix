@@ -397,11 +397,21 @@ class GoodsReceiptViewSet(
     serializer_class = GoodsReceiptSerializer
 
     def get_queryset(self):
-        return (
+        queryset = (
             GoodsReceipt.tenant_objects.select_related("supplier", "location", "order")
             .prefetch_related("lines__product", "lines__uom")
             .all()
         )
+        # Lets the receiving screen find the draft the supplier's advance
+        # notice already seeded, rather than opening a second one against
+        # the same delivery.
+        order = self.request.query_params.get("order")
+        state = self.request.query_params.get("status")
+        if order:
+            queryset = queryset.filter(order_id=order)
+        if state:
+            queryset = queryset.filter(status=state)
+        return queryset
 
     @action(detail=False, methods=["post"], url_path="import-transfer")
     def import_transfer(self, request):
@@ -522,6 +532,23 @@ class GoodsReceiptViewSet(
             serial=data.get("serial", ""),
         )
         receipt.refresh_from_db()
+        return Response(GoodsReceiptSerializer(receipt).data)
+
+    @action(detail=True, methods=["post"], url_path="reset-lines")
+    def reset_lines(self, request, pk=None):
+        """Clear a draft's lines so the receiver's count replaces them.
+
+        Only on a draft. Nothing has moved yet, so there is no ledger to
+        contradict — and once posted, a receipt is history and correcting
+        it means a new document, not an edit.
+
+        This exists because the supplier's advance notice seeds the lines
+        and the person at the door has to be able to disagree with them.
+        """
+        receipt = self.get_object()
+        if receipt.status != GoodsReceiptStatus.DRAFT:
+            raise services.AlreadyPosted()
+        receipt.lines.all().delete()
         return Response(GoodsReceiptSerializer(receipt).data)
 
     @action(detail=True, methods=["post"], url_path="landed-cost")

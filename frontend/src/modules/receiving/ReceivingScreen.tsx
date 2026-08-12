@@ -14,7 +14,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PackageCheck, ScanLine, Snowflake } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   ApiFailure,
@@ -174,9 +174,51 @@ function ReceiveAgainstOrder({
   const update = (lineId: string, patch: Partial<Entry>) =>
     setEntries((prev) => ({ ...prev, [lineId]: { ...prev[lineId], ...patch } }));
 
+  /* The supplier's advance notice seeds a draft receipt at dispatch.
+     Using it rather than opening a second one is what keeps one delivery
+     to one receipt — two drafts against one delivery is how stock gets
+     received twice. */
+  const seeded = useQuery({
+    queryKey: ["draft-receipt", order.id],
+    queryFn: () => api.draftReceiptFor(order.id),
+  });
+  const draft = seeded.data?.results?.[0] ?? null;
+
+  /* Batch and expiry are the two fields the receiver would otherwise
+     copy off the cartons by hand, and the two most worth getting from
+     the supplier. Applied once, when the draft arrives — after that the
+     receiver's edits own the field. */
+  const [seededFrom, setSeededFrom] = useState<string | null>(null);
+  useEffect(() => {
+    if (!draft || seededFrom === draft.id) return;
+    setEntries((prev) => {
+      const next = { ...prev };
+      for (const seededLine of draft.lines ?? []) {
+        if (!seededLine.order_line || !next[seededLine.order_line]) continue;
+        next[seededLine.order_line] = {
+          ...next[seededLine.order_line],
+          received: String(seededLine.received),
+          batch: seededLine.batch_number,
+          expiry: seededLine.expiry_date,
+        };
+      }
+      return next;
+    });
+    setSeededFrom(draft.id);
+  }, [draft, seededFrom]);
+
   const post = useMutation({
     mutationFn: async () => {
-      const receipt = await api.startReceipt({ location: locationId!, order: order.id });
+      const receipt =
+        draft ??
+        (await api.startReceipt({ location: locationId!, order: order.id }));
+
+      // A seeded draft already carries the supplier's figures. What goes
+      // on the ledger is what the receiver counted, so the seeded lines
+      // are cleared and rewritten from the screen — otherwise a
+      // correction would be added on top and double the quantity.
+      if (draft) await api.resetReceiptLines(receipt.id);
+
       for (const line of order.lines) {
         const entry = entries[line.id];
         const received = Number(entry.received);
@@ -346,6 +388,15 @@ function ReceiveAgainstOrder({
       {failure && (
         <Banner tone="bad" className="mb-4">
           {failure}
+        </Banner>
+      )}
+      {/* The supplier's advance notice already filled these lines in.
+          Saying so matters: the receiver is confirming a count, not
+          entering one, and a pre-filled figure they did not check is
+          exactly what a goods receipt exists to catch. */}
+      {draft?.transfer_id && (
+        <Banner tone="info" className="mb-4">
+          {`Pre-filled from ${draft.transfer_id}. Count against the cartons before posting.`}
         </Banner>
       )}
       {incomplete > 0 && (

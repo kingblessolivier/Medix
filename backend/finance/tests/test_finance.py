@@ -628,3 +628,120 @@ class TestCapitalInvested:
             organization=depot["wholesale"], start=MONTH_AGO, end=TODAY
         )
         assert invested == 300 * 1_000 + 100_000
+
+
+class TestDashboardSeries:
+    """The four charts docs/28 §12.5 specifies."""
+
+    def test_the_trend_has_one_row_per_month(self, depot):
+        rows = reports.investment_against_revenue(
+            organization=depot["wholesale"],
+            start=TODAY - timedelta(days=70),
+            end=TODAY,
+            tier=reports.DEPOT,
+        )
+        assert 3 <= len(rows) <= 4
+        assert set(rows[0]) == {"period", "invested", "revenue"}
+
+    def test_both_trend_series_are_money(self, depot):
+        """Which is why they share one axis rather than getting two."""
+        stocked(depot, batch_number="A1", unit_cost=280)
+        order, _, _ = sell(depot, packs=10, price=10_000)
+        invoice = invoicing.build_invoice(order=order, performed_by=depot["seller"])
+        invoicing.issue_invoice(invoice=invoice, performed_by=depot["seller"])
+
+        rows = reports.investment_against_revenue(
+            organization=depot["wholesale"],
+            start=MONTH_AGO,
+            end=TODAY,
+            tier=reports.DEPOT,
+        )
+        assert all(isinstance(row["invested"], int) for row in rows)
+        assert all(isinstance(row["revenue"], int) for row in rows)
+
+    def test_a_partial_month_is_clipped_not_rounded_out(self, depot):
+        """Reporting the whole month would look like a collapse in trade."""
+        rows = reports.investment_against_revenue(
+            organization=depot["wholesale"],
+            start=TODAY.replace(day=1),
+            end=TODAY.replace(day=1),
+            tier=reports.DEPOT,
+        )
+        assert len(rows) == 1
+
+    def test_inventory_health_bands_by_expiry_runway(self, depot):
+        make_batch(
+            depot["wholesale"], depot["product"], number="SOON",
+            unit_cost_base=100, expires_in_days=30,
+        )
+        make_batch(
+            depot["wholesale"], depot["product"], number="MID",
+            unit_cost_base=100, expires_in_days=150,
+        )
+        make_batch(
+            depot["wholesale"], depot["product"], number="FAR",
+            unit_cost_base=100, expires_in_days=500,
+        )
+        from inventory.models import Batch
+
+        for number in ("SOON", "MID", "FAR"):
+            inventory.post_movement(
+                organization=depot["wholesale"],
+                location=depot["warehouse"],
+                batch=Batch.objects.get(
+                    organization=depot["wholesale"], batch_number=number
+                ),
+                kind=MovementKind.PURCHASE_RECEIPT,
+                quantity=Quantity(1, uom(depot["product"], "PACK")),
+            )
+
+        health = reports.inventory_health(organization=depot["wholesale"])[0]
+        assert health["expiring"] == 100 * 100
+        assert health["slow"] == 100 * 100
+        assert health["stable"] == 100 * 100
+
+    def test_revenue_by_category_folds_the_tail_into_other(self, depot):
+        """Thirteen categories against three dark slots is a form problem."""
+        rows = reports.revenue_by_category(
+            organization=depot["wholesale"],
+            start=MONTH_AGO,
+            end=TODAY,
+            tier=reports.DEPOT,
+            top=3,
+        )
+        assert len(rows) <= 4
+        if len(rows) == 4:
+            assert rows[-1]["category"] == "Other"
+
+    def test_sales_against_collections_separates_the_two(self, depot):
+        """A depot can trade itself out of cash while revenue rises."""
+        stocked(depot, batch_number="A1", unit_cost=280)
+        order, _, _ = sell(depot, packs=10, price=10_000)
+        invoice = invoicing.build_invoice(order=order, performed_by=depot["seller"])
+        invoicing.issue_invoice(invoice=invoice, performed_by=depot["seller"])
+
+        rows = reports.sales_against_collections(
+            organization=depot["wholesale"], start=MONTH_AGO, end=TODAY
+        )
+        this_month = rows[-1]
+        assert this_month["invoiced"] == invoice.total
+        assert this_month["collected"] == 0
+
+        invoicing.record_payment(
+            invoice=invoice, amount=invoice.total, performed_by=depot["seller"]
+        )
+        rows = reports.sales_against_collections(
+            organization=depot["wholesale"], start=MONTH_AGO, end=TODAY
+        )
+        assert rows[-1]["collected"] == invoice.total
+
+    def test_the_dashboard_returns_every_panel(self, depot):
+        payload = reports.dashboard(
+            organization=depot["wholesale"],
+            start=MONTH_AGO,
+            end=TODAY,
+            tier=reports.DEPOT,
+        )
+        assert set(payload) == {
+            "report", "trend", "inventory_health", "revenue_by_category", "cash"
+        }

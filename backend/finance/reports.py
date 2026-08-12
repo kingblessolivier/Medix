@@ -23,8 +23,8 @@ files a return on it has been misled by us. See docs/28 §12.3.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from datetime import date
+from dataclasses import asdict, dataclass
+from datetime import date, timedelta
 
 from django.db.models import F, Sum
 
@@ -379,6 +379,227 @@ def period_report(
         cash_revenue=cash,
         insurance_revenue=insurance,
     )
+
+
+# --------------------------------------------------------------------------
+# Series, for the charts
+# --------------------------------------------------------------------------
+
+
+def _months(start: date, end: date) -> list[tuple[date, date, str]]:
+    """Whole months spanning the range, clipped to it.
+
+    Clipped rather than rounded outward: a range ending on the 17th must
+    not silently report the whole month, which would make the last
+    column look like a collapse in trade.
+    """
+    import calendar
+
+    out = []
+    cursor = start.replace(day=1)
+    while cursor <= end:
+        last = cursor.replace(day=calendar.monthrange(cursor.year, cursor.month)[1])
+        out.append(
+            (max(cursor, start), min(last, end), cursor.strftime("%b %y"))
+        )
+        cursor = last + timedelta(days=1)
+    return out
+
+
+def investment_against_revenue(
+    *, organization: Organization, start: date, end: date, tier: str = RETAIL
+) -> list[dict]:
+    """Two RWF series, month by month, for **one axis**.
+
+    Both are money in the same currency. A second axis would invent a
+    scale difference that is not there, and a dual axis can be made to
+    show any relationship its author wants. The widening or narrowing gap
+    between the two lines is the whole message.
+    """
+    revenue_of = depot_revenue if tier == DEPOT else (
+        lambda **kw: retail_revenue(**kw)["total"]
+    )
+    return [
+        {
+            "period": label,
+            "invested": capital_invested(
+                organization=organization, start=month_start, end=month_end
+            ),
+            "revenue": revenue_of(
+                organization=organization, start=month_start, end=month_end
+            ),
+        }
+        for month_start, month_end, label in _months(start, end)
+    ]
+
+
+def inventory_health(
+    *, organization: Organization, as_of: date | None = None
+) -> list[dict]:
+    """Stock value split three ways: stable, slow-moving, expiring.
+
+    The one chart where the status ramp is correct rather than reserved —
+    safe, slow-moving and expiring *are* statuses, not arbitrary
+    categories.
+
+    Slow-moving is defined by expiry runway rather than by sales
+    velocity: a batch with under six months left is the one a clearance
+    decision is actually made about, and velocity needs a longer history
+    than a new deployment has.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from inventory.models import StockBalance, StockStatus
+
+    as_of = as_of or timezone.localdate()
+    balances = StockBalance.objects.filter(
+        organization=organization, status=StockStatus.AVAILABLE, quantity_base__gt=0
+    ).select_related("batch")
+
+    bands = {"expiring": 0, "slow": 0, "stable": 0}
+    for balance in balances:
+        value = balance.quantity_base * balance.batch.unit_cost_base
+        days = (balance.expiry_date - as_of).days
+        if days <= 0:
+            continue
+        if days <= 90:
+            bands["expiring"] += value
+        elif days <= 180:
+            bands["slow"] += value
+        else:
+            bands["stable"] += value
+
+    return [
+        {
+            "band": "Stock value",
+            "stable": bands["stable"],
+            "slow": bands["slow"],
+            "expiring": bands["expiring"],
+        }
+    ]
+
+
+def revenue_by_category(
+    *,
+    organization: Organization,
+    start: date,
+    end: date,
+    tier: str = RETAIL,
+    top: int = 3,
+) -> list[dict]:
+    """Top three therapeutic classes plus Other.
+
+    Thirteen categories against three validated dark slots is not a
+    palette problem to solve with more hues — it is a form problem. Bar
+    length carries the comparison and colour carries nothing, and the
+    tail folds into Other sorted by value. See docs/21 §2.
+    """
+    if tier == DEPOT:
+        from commerce.models import ShipmentLine, ShipmentStatus
+
+        rows = (
+            ShipmentLine.objects.filter(
+                shipment__organization=organization,
+                shipment__status=ShipmentStatus.DISPATCHED,
+                shipment__dispatched_at__date__gte=start,
+                shipment__dispatched_at__date__lte=end,
+            )
+            .values("product__category__name")
+            .annotate(
+                amount=Sum(
+                    F("quantity_base")
+                    * F("order_line__unit_price")
+                    / F("order_line__uom__factor_to_base")
+                )
+            )
+            .order_by("-amount")
+        )
+    else:
+        from sales.models import SaleLine, SaleStatus
+
+        rows = (
+            SaleLine.objects.filter(
+                sale__organization=organization,
+                sale__status=SaleStatus.COMPLETED,
+                sale__occurred_at__date__gte=start,
+                sale__occurred_at__date__lte=end,
+            )
+            .values("product__category__name")
+            .annotate(amount=Sum(F("line_subtotal") - F("discount")))
+            .order_by("-amount")
+        )
+
+    ranked = [
+        {"category": row["product__category__name"] or "Uncategorised",
+         "amount": int(row["amount"] or 0)}
+        for row in rows
+        if (row["amount"] or 0) > 0
+    ]
+    head = ranked[:top]
+    tail = sum(row["amount"] for row in ranked[top:])
+    if tail:
+        head.append({"category": "Other", "amount": tail})
+    return head
+
+
+def sales_against_collections(
+    *, organization: Organization, start: date, end: date, tier: str = DEPOT
+) -> list[dict]:
+    """Invoiced against actually banked, month by month.
+
+    The chart a depot extending Net-30 needs. Sales can rise while cash
+    falls, and a single revenue line cannot show it — a business can
+    trade itself out of working capital while every headline improves.
+    """
+    from commerce.models import Invoice, InvoiceKind, InvoicePayment, InvoiceStatus
+
+    out = []
+    for month_start, month_end, label in _months(start, end):
+        invoiced = (
+            Invoice.objects.filter(
+                organization=organization,
+                kind=InvoiceKind.TAX,
+                status__in=[
+                    InvoiceStatus.ISSUED, InvoiceStatus.PART_PAID, InvoiceStatus.PAID
+                ],
+                issued_on__gte=month_start,
+                issued_on__lte=month_end,
+            ).aggregate(total=Sum("total"))["total"]
+            or 0
+        )
+        collected = (
+            InvoicePayment.objects.filter(
+                organization=organization,
+                received_on__gte=month_start,
+                received_on__lte=month_end,
+            ).aggregate(total=Sum("amount"))["total"]
+            or 0
+        )
+        out.append({"period": label, "invoiced": invoiced, "collected": collected})
+    return out
+
+
+def dashboard(
+    *, organization: Organization, start: date, end: date, tier: str = RETAIL
+) -> dict:
+    """Everything the performance view needs, in one round trip."""
+    return {
+        "report": period_report(
+            organization=organization, start=start, end=end, tier=tier
+        ).as_dict(),
+        "trend": investment_against_revenue(
+            organization=organization, start=start, end=end, tier=tier
+        ),
+        "inventory_health": inventory_health(organization=organization, as_of=end),
+        "revenue_by_category": revenue_by_category(
+            organization=organization, start=start, end=end, tier=tier
+        ),
+        "cash": sales_against_collections(
+            organization=organization, start=start, end=end, tier=tier
+        ),
+    }
 
 
 # --------------------------------------------------------------------------

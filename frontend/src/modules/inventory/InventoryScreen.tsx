@@ -21,6 +21,7 @@ import {
   type Tone,
 } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
+import { AlertStack } from "@/components/ui/AlertStack";
 
 /** Expiry banding. Status is never colour alone — the dot carries a label. */
 function expiryTone(days: number): { tone: Tone; label: string } {
@@ -55,6 +56,14 @@ export function InventoryScreen() {
   const stock = useQuery({
     queryKey: ["stock"],
     queryFn: () => api.stock(),
+  });
+
+  /* Short-dated batches and products under their reorder point. Both
+     thresholds are effective-dated configuration on the server, not
+     numbers this screen knows. */
+  const alerts = useQuery({
+    queryKey: ["alerts", "inventory"],
+    queryFn: () => api.alerts("inventory"),
   });
 
   const rows = useMemo(() => {
@@ -121,6 +130,10 @@ export function InventoryScreen() {
         description="Stock, batches, expiry"
         actions={<Button variant="primary">Adjust stock</Button>}
       />
+
+      {/* Above the table it is about, never floating. The component
+          holds the three-per-screen limit, so this cannot flood. */}
+      <AlertStack alerts={alerts.data?.visible ?? []} className="mb-4" />
 
       {/* Borderless, one hairline beneath. Never cards. */}
       <div className="mb-4 flex flex-wrap gap-8 border-b border-hair pb-4">

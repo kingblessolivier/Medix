@@ -7,7 +7,10 @@ import { AppShell, navigationFor } from "@/components/navigation/AppShell";
 import { EmptyState } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { api, logout, tokens } from "@/lib/api";
+import { PerformanceScreen } from "@/modules/analytics/PerformanceScreen";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
+import { DocumentsScreen } from "@/modules/documents/DocumentsScreen";
+import { FinanceScreen } from "@/modules/finance/FinanceScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
 import { MarketplaceScreen } from "@/modules/marketplace/MarketplaceScreen";
 import { OrdersScreen } from "@/modules/orders/OrdersScreen";
@@ -105,6 +108,12 @@ export default function App() {
           <ReceivingScreen locationId={mainLocation ?? null} />
         ) : active === "import" ? (
           <ImportReceiptScreen locationId={mainLocation ?? null} />
+        ) : active === "analytics" ? (
+          <PerformanceScreen canSupply={canSupply} />
+        ) : active === "finance" ? (
+          <FinanceScreen />
+        ) : active === "documents" ? (
+          <DocumentsScreen />
         ) : (
           <EmptyState
             heading="Not built yet"

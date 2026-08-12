@@ -337,6 +337,106 @@ export type OrderLine = {
   undispatched_base: number;
 };
 
+/* -- documents --------------------------------------------------------- */
+
+/* Named MedixDocument because `Document` is the DOM global, and shadowing
+   it in a file this widely imported is how someone loses an afternoon. */
+export type MedixDocument = {
+  id: string;
+  kind: string;
+  kind_label: string;
+  number: string;
+  version: number;
+  subject_type: string;
+  subject_id: string;
+  issued_at: string;
+  issued_by_name: string;
+  sha256: string;
+  has_pdf: boolean;
+  supersedes: string | null;
+};
+
+/* -- finance ----------------------------------------------------------- */
+
+export type CategoryTotal = { code: string; name: string; amount: number };
+
+/* Money in minor units, ratios in basis points. No `net_profit` field —
+   see docs/28 §12.3; the estimate carries its own basis instead. */
+export type PeriodReport = {
+  organization_id: string;
+  tier: "DEPOT" | "RETAIL";
+  start: string;
+  end: string;
+  currency: string;
+  capital_invested: number;
+  revenue: number;
+  cogs: number;
+  gross_profit: number;
+  /** Null when there was no revenue — not the same as a zero margin. */
+  gross_margin_bp: number | null;
+  expenses_total: number;
+  expenses: CategoryTotal[];
+  estimated_operating_result: number;
+  estimated_basis: string;
+  write_offs: number;
+  stock_at_risk: number;
+  roi_bp: number | null;
+  cash_revenue: number;
+  insurance_revenue: number;
+};
+
+export type DashboardPayload = {
+  report: PeriodReport;
+  trend: { period: string; invested: number; revenue: number }[];
+  inventory_health: { band: string; stable: number; slow: number; expiring: number }[];
+  revenue_by_category: { category: string; amount: number }[];
+  cash: { period: string; invoiced: number; collected: number }[];
+};
+
+export type ReceivablesAgeing = {
+  as_of: string;
+  buckets: Record<string, number>;
+  total: number;
+  customers: (Record<string, number | string> & { customer: string; total: number })[];
+};
+
+export type ExpenseCategory = {
+  id: string;
+  code: string;
+  name: string;
+  is_operating: boolean;
+  is_active: boolean;
+};
+
+export type Expense = {
+  id: string;
+  category: string;
+  category_name: string;
+  incurred_on: string;
+  amount: number;
+  currency: string;
+  description: string;
+  payee: string;
+  reference: string;
+};
+
+export type WriteOff = {
+  id: string;
+  number: string;
+  batch: string;
+  batch_number: string;
+  product_name: string;
+  reason: string;
+  reason_label: string;
+  quantity_base: number;
+  unit_cost_base: number;
+  value: number;
+  currency: string;
+  written_off_on: string;
+  witness_name: string;
+  witness_role: string;
+};
+
 /* Severity is behaviour, not decoration: CRITICAL means the request was
    refused, WARNING means it will be refused until the code comes back in
    `acknowledged`, INFO never interrupts. See docs/29-alerts.md. */
@@ -432,6 +532,8 @@ export type ReceiptLine = {
   unit_cost_base: number;
   landed_cost_share: number;
   gtin: string;
+  /** The order line this fulfils, when the receipt was raised against one. */
+  order_line: string | null;
 };
 
 /** One rung of a mixed-unit count: "2 cartons", "5 packs". */
@@ -473,6 +575,8 @@ export type GoodsReceipt = {
   clearing_fees: number;
   other_charges: number;
   landed_charges: number;
+  /** Delivery note this receipt was seeded from, if the supplier sent one. */
+  transfer_id: string;
   lines: ReceiptLine[];
 };
 
@@ -562,6 +666,11 @@ export const api = {
   shipments: (id: string) => request<Shipment[]>(`/purchase-orders/${id}/shipments/`),
 
   receipts: () => request<Paginated<GoodsReceipt>>("/goods-receipts/"),
+  /** The draft a supplier's advance notice already seeded, if any. */
+  draftReceiptFor: (orderId: string) =>
+    request<Paginated<GoodsReceipt>>(
+      `/goods-receipts/?order=${orderId}&status=DRAFT`,
+    ),
   startReceipt: (body: { location: string; order?: string; supplier?: string }) =>
     request<GoodsReceipt>("/goods-receipts/", { method: "POST", body }),
   addReceiptLine: (
@@ -581,6 +690,12 @@ export const api = {
       order_line?: string;
     },
   ) => request<GoodsReceipt>(`/goods-receipts/${id}/lines/`, { method: "POST", body }),
+  /** Clears a draft's seeded lines so the receiver's count replaces them. */
+  resetReceiptLines: (id: string) =>
+    request<GoodsReceipt>(`/goods-receipts/${id}/reset-lines/`, {
+      method: "POST",
+      body: {},
+    }),
   setLandedCost: (id: string, body: LandedCost) =>
     request<GoodsReceipt>(`/goods-receipts/${id}/landed-cost/`, { method: "POST", body }),
   landedCostPreview: (id: string) =>
@@ -589,4 +704,48 @@ export const api = {
     request<GoodsReceipt>(`/goods-receipts/${id}/post_receipt/`, { method: "POST", body: {} }),
   discrepancies: (id: string) =>
     request<Discrepancy[]>(`/goods-receipts/${id}/discrepancies/`),
+
+  /* -- documents ------------------------------------------------------- */
+
+  documents: (params = "") => request<Paginated<MedixDocument>>(`/documents/${params}`),
+  documentsFor: (subjectId: string) =>
+    request<Paginated<MedixDocument>>(`/documents/?subject=${subjectId}`),
+  /** The stored HTML, not a re-render — preview and print cannot diverge. */
+  documentPreviewUrl: (id: string) => `${BASE}/documents/${id}/preview/`,
+  documentPdfUrl: (id: string) => `${BASE}/documents/${id}/pdf/`,
+
+  /* -- finance --------------------------------------------------------- */
+
+  financeDashboard: (params: { start: string; end: string; tier: string }) =>
+    request<DashboardPayload>(
+      `/finance/dashboard/?start=${params.start}&end=${params.end}&tier=${params.tier}`,
+    ),
+  financePeriod: (params: { start: string; end: string; tier: string }) =>
+    request<PeriodReport>(
+      `/finance/period/?start=${params.start}&end=${params.end}&tier=${params.tier}`,
+    ),
+  receivables: () => request<ReceivablesAgeing>("/finance/receivables/"),
+
+  expenseCategories: () => request<Paginated<ExpenseCategory>>("/expense-categories/"),
+  expenses: (params = "") => request<Paginated<Expense>>(`/expenses/${params}`),
+  recordExpense: (body: {
+    category: string;
+    amount: number;
+    incurred_on?: string;
+    description?: string;
+    payee?: string;
+    reference?: string;
+  }) => request<Expense>("/expenses/", { method: "POST", body }),
+
+  writeOffs: () => request<Paginated<WriteOff>>("/write-offs/"),
+  recordWriteOff: (body: {
+    batch: string;
+    location: string;
+    quantity: number;
+    uom_code?: string;
+    reason: string;
+    witness_name?: string;
+    witness_role?: string;
+    written_off_on?: string;
+  }) => request<WriteOff>("/write-offs/", { method: "POST", body }),
 };

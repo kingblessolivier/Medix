@@ -10,5 +10,6 @@ router.register("write-offs", views.WriteOffViewSet, basename="write-off")
 
 urlpatterns = [
     path("finance/period/", views.PeriodReportView.as_view(), name="finance-period"),
+    path("finance/dashboard/", views.DashboardView.as_view(), name="finance-dashboard"),
     path("finance/receivables/", views.ReceivablesView.as_view(), name="finance-receivables"),
 ] + router.urls
