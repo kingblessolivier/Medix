@@ -21,6 +21,8 @@ from core import sequences
 from core.capabilities import Capability, require_capability
 from core.exceptions import DomainError, InsufficientStock
 from core.models import Organization, User
+from core import pricing
+from core.money import Money
 from core.quantity import Quantity, from_base
 from commerce.models import (
     Availability,
@@ -63,6 +65,11 @@ class CustomerNotVerified(DomainError):
 class InsufficientOffer(DomainError):
     default_code = "insufficient_offer"
     default_detail = "The depot has not offered that much."
+
+
+class NotSellable(DomainError):
+    default_code = "not_sellable_by_unit"
+    default_detail = "The depot does not sell this product by that unit."
 
 
 class NotApprover(DomainError):
@@ -192,8 +199,25 @@ def open_draft(
 
 @transaction.atomic
 def add_order_line(
-    *, order: PurchaseOrder, listing: VendorListing, quantity: int
+    *,
+    order: PurchaseOrder,
+    listing: VendorListing,
+    quantity: int,
+    uom: UnitOfMeasure | None = None,
 ) -> PurchaseOrderLine:
+    """Add a quantity of a listing, in the unit the buyer chose.
+
+    A depot prices in one unit — usually the pack — but a buyer does not
+    always want that unit. `uom` may be any level the depot is willing to
+    sell at, and the price for it is derived from the listing price rather
+    than stored separately, so a repricing cannot leave the two disagreeing.
+
+    Every comparison below happens in **base units**. Minimum order and
+    remaining allocation are quantities of medicine, not counts of
+    whatever box the buyer happened to pick, and comparing pack counts
+    against carton counts is how an order for a tenth of the intended
+    amount gets accepted.
+    """
     if order.status != PurchaseOrderStatus.DRAFT:
         raise DomainError("This order has been submitted.", code="order_not_draft")
     if listing.organization_id != order.supplier_id:
@@ -206,51 +230,79 @@ def add_order_line(
             "Raise an import request instead.",
             meta={"availability": listing.availability},
         )
-    # Adding the same product twice means "more of it", not a second line
-    # the vendor has to reconcile. Price is part of the match: if the
-    # listing has repriced since the first add, that is a distinct line.
-    line = order.lines.filter(
-        product=listing.product, uom=listing.price_uom, unit_price=listing.price
-    ).first()
+    if quantity <= 0:
+        raise DomainError("Quantity must be positive.", code="non_positive_quantity")
 
-    # The minimum applies to the line the supplier ends up picking, not to
-    # each click. Topping a line of 10 up by 5 leaves 15, which clears a
-    # minimum of 10 — refusing that would be arithmetic, not policy.
-    # The offer is the ceiling, not the depot's shelf. A buyer may only
-    # take what was published and is not already spoken for.
-    resulting_base = ((line.quantity if line is not None else 0) + quantity) * listing.price_uom.factor_to_base
-    already = (line.quantity_base if line is not None else 0)
-    if resulting_base - already > listing.available_base:
+    chosen = uom or listing.price_uom
+    if chosen.product_id != listing.product_id:
+        raise DomainError("That unit belongs to another product.", code="uom_mismatch")
+    if not chosen.is_sellable:
+        raise NotSellable(
+            f"{listing.organization.name} does not sell {listing.product.name} "
+            f"by the {chosen.code.lower()}.",
+            meta={"uom": chosen.code},
+        )
+
+    added_base = quantity * chosen.factor_to_base
+
+    # One line per product and unit. Two lines of the same product in
+    # different units is a legitimate order — a carton plus a loose pack —
+    # so the unit is part of the identity, not just the price.
+    line = order.lines.filter(
+        product=listing.product, uom=chosen, unit_price=_unit_price(listing, chosen)
+    ).first()
+    existing_base = line.quantity_base if line is not None else 0
+    resulting_base = existing_base + added_base
+
+    if added_base > listing.available_base:
+        available = listing.available_base // chosen.factor_to_base
         raise InsufficientOffer(
-            f"{listing.product.name}: {listing.available_base // listing.price_uom.factor_to_base} "
-            f"{listing.price_uom.code.lower()} available.",
+            f"{listing.product.name}: {available} {chosen.code.lower()} available.",
             meta={"available_base": listing.available_base},
         )
 
-    resulting = (line.quantity if line is not None else 0) + quantity
-    if resulting < listing.moq:
+    moq_base = listing.moq * listing.price_uom.factor_to_base
+    if resulting_base < moq_base:
         raise BelowMinimum(
             f"Minimum order is {listing.moq} {listing.price_uom.code.lower()}.",
-            meta={"moq": listing.moq, "requested": resulting},
+            meta={"moq_base": moq_base, "requested_base": resulting_base},
         )
 
+    unit_price = _unit_price(listing, chosen)
     if line is not None:
-        line.quantity = resulting
-        line.quantity_base = Quantity(resulting, listing.price_uom).base_value
-        line.line_total = listing.price * resulting
+        line.quantity += quantity
+        line.quantity_base = resulting_base
+        line.line_total = unit_price * line.quantity
         line.save(update_fields=["quantity", "quantity_base", "line_total"])
     else:
         line = PurchaseOrderLine.objects.create(
             order=order,
             product=listing.product,
-            uom=listing.price_uom,
+            uom=chosen,
             quantity=quantity,
-            quantity_base=Quantity(quantity, listing.price_uom).base_value,
-            unit_price=listing.price,
-            line_total=listing.price * quantity,
+            quantity_base=added_base,
+            unit_price=unit_price,
+            line_total=unit_price * quantity,
         )
     _recalculate_order(order)
     return line
+
+
+def _unit_price(listing: VendorListing, uom: UnitOfMeasure) -> int:
+    """The listing price restated in `uom`.
+
+    Derived, never stored: a listing that reprices must not leave a
+    stale per-unit figure behind it. Breaking a pack down rounds up, so
+    buying loose is never cheaper per unit than buying the pack — see
+    core.pricing.
+    """
+    if uom.id == listing.price_uom_id:
+        return listing.price
+    return pricing.derive(
+        Money(listing.price, listing.currency),
+        from_uom=listing.price_uom,
+        to_uom=uom,
+    ).price.amount
 
 
 def _recalculate_order(order: PurchaseOrder) -> None:

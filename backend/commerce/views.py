@@ -257,8 +257,12 @@ class PurchaseOrderViewSet(
             VendorListing.objects.select_related("product", "price_uom"),
             pk=payload.validated_data["listing"],
         )
+        code = payload.validated_data.get("uom_code", "")
         services.add_order_line(
-            order=order, listing=listing, quantity=payload.validated_data["quantity"]
+            order=order,
+            listing=listing,
+            quantity=payload.validated_data["quantity"],
+            uom=_resolve_uom(listing.product, code) if code else None,
         )
         order.refresh_from_db()
         return Response(PurchaseOrderSerializer(order).data)

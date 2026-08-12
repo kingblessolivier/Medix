@@ -256,6 +256,16 @@ export type Sale = {
 
 export type Location = { id: string; name: string; code: string };
 
+/** A level the depot will sell at, with the price restated for it. */
+export type SellableUnit = {
+  code: string;
+  name: string;
+  factor_to_base: number;
+  price: number;
+  /** The level the depot actually listed; the rest are derived. */
+  is_priced: boolean;
+};
+
 export type MarketplaceRow = {
   id: string;
   product: string;
@@ -282,6 +292,7 @@ export type MarketplaceRow = {
   /** What the depot published, less what is committed. Not its stock. */
   available_base: number;
   earliest_expiry: string | null;
+  units: SellableUnit[];
 };
 
 
@@ -445,7 +456,10 @@ export const api = {
      adding from the marketplace builds one order, not one per click. */
   openDraft: (body: { supplier: string; deliver_to: string }) =>
     request<PurchaseOrder>("/purchase-orders/draft/", { method: "POST", body }),
-  addOrderLine: (id: string, body: { listing: string; quantity: number }) =>
+  addOrderLine: (
+    id: string,
+    body: { listing: string; quantity: number; uom_code?: string },
+  ) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/lines/`, { method: "POST", body }),
   submitOrder: (id: string) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/submit/`, { method: "POST", body: {} }),

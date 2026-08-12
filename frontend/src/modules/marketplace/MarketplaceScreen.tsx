@@ -40,6 +40,7 @@ import {
   ErrorState,
   Field,
   Input,
+  Select,
   PageHeader,
   StatusDot,
   StatusPill,
@@ -394,16 +395,18 @@ function CompareModal({
 }) {
   const queryClient = useQueryClient();
   const [quantity, setQuantity] = useState("");
+  const [unitCode, setUnitCode] = useState("");
   const [added, setAdded] = useState<{ number: string | null; lines: number } | null>(null);
   const [failure, setFailure] = useState("");
 
-  // Each product opens on its own minimum, and last product's outcome
-  // must not linger on the next one.
+  // Each product opens on its own minimum and its own listed unit, and
+  // the last product's outcome must not linger on the next one.
   useEffect(() => {
     setQuantity(row ? String(row.moq) : "");
+    setUnitCode(row?.uom_code ?? "");
     setAdded(null);
     setFailure("");
-  }, [row?.id, row?.moq]);
+  }, [row?.id, row?.moq, row?.uom_code]);
 
   const add = useMutation({
     mutationFn: async () => {
@@ -411,7 +414,11 @@ function CompareModal({
         supplier: row!.vendor,
         deliver_to: locationId!,
       });
-      return api.addOrderLine(draft.id, { listing: row!.id, quantity: Number(quantity) });
+      return api.addOrderLine(draft.id, {
+        listing: row!.id,
+        quantity: Number(quantity),
+        uom_code: unitCode,
+      });
     },
     onSuccess: (order) => {
       // An order is numbered when it is submitted, not while it is built.
@@ -430,7 +437,17 @@ function CompareModal({
   if (!row) return null;
   const state = AVAILABILITY[row.availability] ?? AVAILABILITY.NOT_IN_COUNTRY;
   const count = Number(quantity);
-  const valid = Number.isInteger(count) && count > 0 && Boolean(locationId);
+  const chosen = row.units.find((u) => u.code === unitCode) ?? row.units[0];
+  const valid =
+    Number.isInteger(count) && count > 0 && Boolean(locationId) && Boolean(chosen);
+
+  // Both the running total and what the depot has left are quoted in the
+  // unit the buyer picked. Showing a carton count against a pack total is
+  // how an order for a twelfth of the intended amount looks correct.
+  const lineTotal = chosen ? chosen.price * (valid ? count : 0) : 0;
+  const availableInUnit = chosen
+    ? Math.floor(row.available_base / chosen.factor_to_base)
+    : 0;
 
   return (
     <Modal
@@ -441,7 +458,7 @@ function CompareModal({
       footer={
         row.is_orderable ? (
           <div className="flex items-end gap-2">
-            <div className="w-24">
+            <div className="w-20">
               <Field label="Quantity">
                 {(id) => (
                   <Input
@@ -452,6 +469,25 @@ function CompareModal({
                     onChange={(e) => setQuantity(e.target.value)}
                     className="tabular text-right"
                   />
+                )}
+              </Field>
+            </div>
+            {/* Only levels the depot will actually break to. A selector
+                offering a unit the server refuses is a trap. */}
+            <div className="w-36">
+              <Field label="Unit">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={unitCode}
+                    onChange={(e) => setUnitCode(e.target.value)}
+                  >
+                    {row.units.map((u) => (
+                      <option key={u.code} value={u.code}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </Select>
                 )}
               </Field>
             </div>
@@ -501,10 +537,19 @@ function CompareModal({
           ["Form", row.dosage_form || "—"],
           ["Brand", row.brand || "—"],
           ["Supplier", row.vendor_name],
-          ["Price", `${CURRENCY.format(row.price)} / ${row.uom_code.toLowerCase()}`],
           ["Minimum order", row.moq.toLocaleString()],
           ["Lead time", `${row.lead_time_days} day${row.lead_time_days === 1 ? "" : "s"}`],
-          ["Order value", CURRENCY.format(row.price * (valid ? count : 0))],
+          [
+            `Price per ${chosen?.code.toLowerCase() ?? "unit"}`,
+            chosen ? CURRENCY.format(chosen.price) : "—",
+          ],
+          [
+            "Available",
+            row.is_orderable
+              ? `${availableInUnit.toLocaleString()} ${chosen?.code.toLowerCase() ?? ""}`
+              : "—",
+          ],
+          ["Order value", CURRENCY.format(lineTotal)],
         ]}
       />
 

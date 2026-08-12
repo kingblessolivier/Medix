@@ -1048,3 +1048,125 @@ class TestApprovalChain:
 
         services.start_preparation(order=order, performed_by=market["seller"])
         assert order.status == PurchaseOrderStatus.PREPARING
+
+
+class TestOrderUnits:
+    """A depot prices in packs; a buyer does not always want packs.
+
+    Every rule here compares base units. Comparing a carton count against
+    a pack minimum is how an order for a twelfth of the intended amount
+    gets waved through.
+    """
+
+    def _listing(self, market, **kwargs):
+        return services.publish_listing(
+            organization=market["wholesale"],
+            product=market["product"],
+            price=28000,
+            price_uom=uom(market["product"], "PACK"),
+            moq=kwargs.pop("moq", 2),
+            offered_base=kwargs.pop("offered_base", 2000),
+            **kwargs,
+        )
+
+    def _order(self, market):
+        return services.start_order(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+
+    def test_ordering_in_the_priced_unit_uses_the_listed_price(self, market):
+        listing = self._listing(market)
+        line = services.add_order_line(order=self._order(market), listing=listing, quantity=5)
+        assert line.uom.code == "PACK"
+        assert line.unit_price == 28000
+        assert line.quantity_base == 500
+
+    def test_ordering_by_the_carton_derives_upward(self, market):
+        """A carton is 12 packs, so it costs twelve pack prices."""
+        listing = self._listing(market)
+        carton = uom(market["product"], "CARTON")
+        line = services.add_order_line(
+            order=self._order(market), listing=listing, quantity=1, uom=carton
+        )
+        assert line.uom.code == "CARTON"
+        assert line.unit_price == 28000 * 12
+        assert line.quantity_base == 1200
+
+    def test_depot_will_not_sell_by_a_unit_it_does_not_break(self, market):
+        """A wholesaler does not open a pack for one capsule.
+
+        The wholesale seed marks loose units unsellable; the test factory
+        does not, so the condition is set here explicitly.
+        """
+        listing = self._listing(market, moq=1)
+        unit = uom(market["product"], "UNIT")
+        unit.is_sellable = False
+        unit.save(update_fields=["is_sellable"])
+
+        with pytest.raises(services.NotSellable):
+            services.add_order_line(
+                order=self._order(market), listing=listing, quantity=50, uom=unit
+            )
+
+    def test_minimum_is_compared_in_base_units(self, market):
+        """One carton clears a two-pack minimum — it is twelve of them.
+
+        Comparing the raw numbers would see 1 < 2 and refuse an order
+        six times larger than the minimum.
+        """
+        listing = self._listing(market, moq=2)
+        carton = uom(market["product"], "CARTON")
+        line = services.add_order_line(
+            order=self._order(market), listing=listing, quantity=1, uom=carton
+        )
+        assert line.quantity_base == 1200
+
+    def test_allocation_is_compared_in_base_units(self, market):
+        """500 base offered is five packs, and not one carton."""
+        listing = self._listing(market, offered_base=500, moq=1)
+        carton = uom(market["product"], "CARTON")
+        with pytest.raises(services.InsufficientOffer):
+            services.add_order_line(
+                order=self._order(market), listing=listing, quantity=1, uom=carton
+            )
+
+    def test_two_units_of_one_product_are_two_lines(self, market):
+        """A carton plus a loose pack is a real order, not a merge."""
+        listing = self._listing(market, moq=1)
+        order = self._order(market)
+        services.add_order_line(
+            order=order, listing=listing, quantity=1, uom=uom(market["product"], "CARTON")
+        )
+        services.add_order_line(
+            order=order, listing=listing, quantity=3, uom=uom(market["product"], "PACK")
+        )
+        order.refresh_from_db()
+        assert order.lines.count() == 2
+        assert {l.uom.code for l in order.lines.all()} == {"CARTON", "PACK"}
+        assert order.subtotal == (28000 * 12) + (28000 * 3)
+
+    def test_same_unit_twice_merges(self, market):
+        listing = self._listing(market, moq=1)
+        order = self._order(market)
+        services.add_order_line(order=order, listing=listing, quantity=2)
+        services.add_order_line(order=order, listing=listing, quantity=3)
+        order.refresh_from_db()
+        assert order.lines.count() == 1
+        assert order.lines.get().quantity == 5
+
+    def test_zero_and_negative_are_refused(self, market):
+        listing = self._listing(market, moq=1)
+        for bad in (0, -3):
+            with pytest.raises(Exception, match="positive"):
+                services.add_order_line(order=self._order(market), listing=listing, quantity=bad)
+
+    def test_a_unit_from_another_product_is_refused(self, market):
+        listing = self._listing(market, moq=1)
+        other = make_product(market["wholesale"], "Paracetamol 500mg")
+        with pytest.raises(Exception, match="another product"):
+            services.add_order_line(
+                order=self._order(market), listing=listing, quantity=1, uom=uom(other, "PACK")
+            )

@@ -53,6 +53,44 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
     available_base = serializers.IntegerField(read_only=True)
     earliest_expiry = serializers.SerializerMethodField()
 
+    units = serializers.SerializerMethodField()
+
+    def get_units(self, listing) -> list[dict]:
+        """Levels this depot will sell at, priced.
+
+        Derived from the listing price rather than stored, so a repricing
+        cannot leave a stale per-unit figure behind. Largest first — a
+        buyer scans down from the carton.
+        """
+        from core import pricing
+        from core.money import Money
+
+        out = []
+        for unit in sorted(
+            listing.product.units.all(), key=lambda u: -u.factor_to_base
+        ):
+            if not unit.is_sellable:
+                continue
+            price = (
+                listing.price
+                if unit.id == listing.price_uom_id
+                else pricing.derive(
+                    Money(listing.price, listing.currency),
+                    from_uom=listing.price_uom,
+                    to_uom=unit,
+                ).price.amount
+            )
+            out.append(
+                {
+                    "code": unit.code,
+                    "name": unit.name,
+                    "factor_to_base": unit.factor_to_base,
+                    "price": price,
+                    "is_priced": unit.id == listing.price_uom_id,
+                }
+            )
+        return out
+
     def get_dosage_form(self, listing) -> str:
         """The base unit is the form — tablet, bottle, vial, pair."""
         registration = getattr(listing.product, "registration", None)
@@ -72,6 +110,7 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
             "category_name",
             "product_type_code",
             "dosage_form",
+            "units",
             "vendor",
             "vendor_name",
             "availability",
@@ -207,9 +246,21 @@ class StartOrderSerializer(serializers.Serializer):
     required_by = serializers.DateField(required=False, allow_null=True)
 
 
+class SellableUnitSerializer(serializers.Serializer):
+    """A level the depot will actually sell at, with its derived price."""
+
+    code = serializers.CharField()
+    name = serializers.CharField()
+    factor_to_base = serializers.IntegerField()
+    price = serializers.IntegerField()
+    is_priced = serializers.BooleanField()
+
+
 class AddOrderLineSerializer(serializers.Serializer):
     listing = serializers.UUIDField()
     quantity = serializers.IntegerField(min_value=1)
+    #: Any level the depot sells at. Defaults to the listing's own unit.
+    uom_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
 
 
 class GoodsReceiptLineSerializer(serializers.ModelSerializer):
