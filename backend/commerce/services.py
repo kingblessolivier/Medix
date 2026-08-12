@@ -41,6 +41,7 @@ from commerce.models import (
     TradingRelationship,
     VendorListing,
 )
+from documents import services as documents
 from inventory import services as inventory
 from inventory.models import Batch, Location, MovementKind, StockStatus
 
@@ -692,7 +693,7 @@ def dispatch_order(
     shipment.save(update_fields=["number", "status", "dispatched_at", "modified_at"])
 
     if controlled:
-        ControlledTransfer.objects.create(
+        transfer = ControlledTransfer.objects.create(
             organization=order.supplier,
             shipment=shipment,
             released_by=controlled_transfer,
@@ -700,6 +701,13 @@ def dispatch_order(
             number=sequences.next_number(order.supplier, "CONTROLLED_TRANSFER"),
             created_by=performed_by,
         )
+        documents.issue_controlled_transfer(transfer=transfer, performed_by=performed_by)
+
+    # The paperwork the goods travel with. Issued here rather than on
+    # demand so the document is frozen against what actually shipped —
+    # rendering it later would restate whatever the records say by then.
+    documents.issue_picking_ticket(shipment=shipment, performed_by=performed_by)
+    documents.issue_delivery_note(shipment=shipment, performed_by=performed_by)
 
     audit.record(
         action="commerce.shipment.dispatched",
@@ -942,6 +950,8 @@ def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
     receipt.posted_at = timezone.now()
     receipt.modified_by = performed_by
     receipt.save(update_fields=["number", "status", "posted_at", "modified_by", "modified_at"])
+
+    documents.issue_goods_receipt_note(receipt=receipt, performed_by=performed_by)
 
     audit.record(
         action="commerce.receipt.posted",

@@ -44,6 +44,7 @@ LOCAL_APPS = [
     "sales",
     "fiscal",
     "commerce",
+    "documents",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -181,6 +182,21 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# --------------------------------------------------------------------------
+# Documents. See docs/18-document-design.md.
+# --------------------------------------------------------------------------
+
+# HTML is always rendered and stored; PDF depends on the host carrying a
+# headless browser. "playwright" once the deployment target is settled,
+# "none" until then — a document with no PDF is still issued, numbered
+# and immutable, and can be back-filled from its stored context.
+DOCUMENT_PDF_BACKEND = env("DOCUMENT_PDF_BACKEND", default="none")
+
+# Print colour is read from the application's tokens rather than copied,
+# so a rename on the frontend fails the document tests instead of
+# silently drifting.
+DESIGN_TOKENS_PATH = ROOT_DIR / "frontend" / "src" / "design" / "tokens.css"
 
 # --------------------------------------------------------------------------
 # Logging — structured, correlation id on every line. See docs/25.

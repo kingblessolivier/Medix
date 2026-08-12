@@ -1,0 +1,237 @@
+{% comment %}
+Every document extends this. It owns the five regions — masthead,
+parties, body, attestation, footer — and the whole print stylesheet.
+
+Templates override the blocks. They must not declare a colour: the
+palette comes from the application's design tokens through
+`documents.tokens`, and a literal hex in a child template is a review
+failure. See docs/18-document-design.md.
+{% endcomment %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ doc_type }} {{ number }}</title>
+<style>
+:root {
+  /* Read from frontend/src/design/tokens.css. Never edited here. */
+  --ink: {{ palette.text }};
+  --muted: {{ palette.muted }};
+  --faint: {{ palette.faint }};
+  --hair: {{ palette.hairline }};
+  --hair-soft: {{ palette.hairline_soft }};
+  --brand: {{ palette.brand }};
+  --paper: {{ palette.surface }};
+  --tint: {{ palette.tint }};
+}
+
+/* A4, portrait. Margins leave room for the repeating footer. */
+@page {
+  size: A4 portrait;
+  margin: 16mm 18mm 20mm 18mm;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Screen preview gets the page shape drawn; print already has it. */
+@media screen {
+  body { padding: 16mm 18mm 20mm; max-width: 210mm; margin: 0 auto; }
+}
+
+.mono { font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace; }
+.num  { font-variant-numeric: tabular-nums; text-align: right; }
+
+/* The only uppercase in the document. */
+.label {
+  font-size: 8pt;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* -- masthead -------------------------------------------------------- */
+
+.masthead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16mm;
+  padding-bottom: 5mm;
+  border-bottom: 0.4pt solid var(--hair);
+}
+
+/* Brand colour appears exactly once in a document, here. */
+.wordmark { font-size: 13pt; font-weight: 700; color: var(--brand); letter-spacing: -0.01em; }
+
+.doc-type { font-size: 20pt; font-weight: 600; line-height: 1.1; margin: 0; }
+.doc-number { font-size: 11pt; font-weight: 500; margin: 1mm 0 0; }
+
+.meta { min-width: 62mm; }
+.meta dl { display: grid; grid-template-columns: auto 1fr; gap: 1mm 6mm; margin: 0; }
+.meta dt { color: var(--muted); }
+.meta dd { margin: 0; text-align: right; }
+
+/* Semantic colour lives only here, and the word is always present so it
+   survives a monochrome printer. */
+.pill {
+  display: inline-block;
+  padding: 0.6mm 2.4mm;
+  border: 0.4pt solid var(--hair);
+  border-radius: 999px;
+  font-size: 8pt;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* -- parties --------------------------------------------------------- */
+
+.parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12mm;
+  padding: 5mm 0;
+  border-bottom: 0.4pt solid var(--hair);
+}
+.party p { margin: 0.6mm 0 0; }
+.party .name { font-weight: 600; }
+.party .line { color: var(--muted); }
+
+/* -- body ------------------------------------------------------------ */
+
+.section { padding-top: 6mm; }
+.section-title { font-size: 10pt; font-weight: 600; margin: 0 0 2.5mm; }
+
+/* No vertical rules, no row banding. A hairline under the header and
+   above the totals is the whole apparatus. */
+table.items { width: 100%; border-collapse: collapse; }
+table.items thead th {
+  font-size: 8.5pt;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+  padding: 0 0 1.6mm;
+  border-bottom: 0.5pt solid var(--hair);
+}
+table.items thead th.num { text-align: right; }
+table.items tbody td { padding: 1.8mm 0; border-bottom: 0.4pt solid var(--hair-soft); vertical-align: top; }
+table.items tbody tr:last-child td { border-bottom: none; }
+table.items td + td, table.items th + th { padding-left: 5mm; }
+.sub { display: block; color: var(--muted); font-size: 8.5pt; }
+
+/* Header repeats when a long table breaks across pages. */
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+
+/* -- totals ---------------------------------------------------------- */
+
+.totals { margin-top: 5mm; display: flex; justify-content: flex-end; break-inside: avoid; }
+.totals dl { display: grid; grid-template-columns: auto 34mm; gap: 1.4mm 8mm; margin: 0; min-width: 72mm; }
+.totals dt { color: var(--muted); }
+.totals dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.totals .grand dt, .totals .grand dd { font-size: 13pt; font-weight: 600; color: var(--ink); padding-top: 1.6mm; }
+.totals .grand { display: contents; }
+.totals .rule { grid-column: 1 / -1; border-top: 0.8pt solid var(--hair); }
+
+/* -- attestation ----------------------------------------------------- */
+
+.attestation { margin-top: 8mm; padding-top: 5mm; border-top: 0.4pt solid var(--hair); break-inside: avoid; }
+.signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 12mm; margin-top: 4mm; }
+/* A named region, never a drawn line. Where the step happened in-system
+   the attestation is printed instead of an empty signature. */
+.sig { }
+.sig .who { margin: 1.5mm 0 0; font-weight: 600; }
+.sig .role { margin: 0; color: var(--muted); }
+.sig .rule { margin-top: 9mm; border-top: 0.5pt solid var(--hair); }
+.attested { margin: 1.5mm 0 0; color: var(--muted); }
+
+.note { margin-top: 4mm; color: var(--muted); }
+
+/* -- verification and footer ----------------------------------------- */
+
+.verify { margin-top: 6mm; display: flex; gap: 5mm; align-items: center; }
+.verify .qr { width: 22mm; height: 22mm; border: 0.4pt solid var(--hair); }
+.verify .ref { font-size: 8pt; color: var(--muted); }
+
+.foot {
+  margin-top: 8mm;
+  padding-top: 3mm;
+  border-top: 0.4pt solid var(--hair);
+  display: flex;
+  justify-content: space-between;
+  font-size: 7.5pt;
+  color: var(--muted);
+}
+@media print {
+  .foot { position: fixed; bottom: 8mm; left: 18mm; right: 18mm; margin: 0; }
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div>
+    <p class="wordmark">Medix</p>
+    <h1 class="doc-type">{{ doc_type }}</h1>
+    <p class="doc-number mono">{{ number }}{% if version > 1 %} · v{{ version }}{% endif %}</p>
+    {% if supersedes %}<p class="label">Supersedes {{ supersedes }}</p>{% endif %}
+  </div>
+  <div class="meta">
+    {% if status %}<p style="text-align:right;margin:0 0 2.5mm"><span class="pill">{{ status }}</span></p>{% endif %}
+    <dl>
+      <dt>Issued</dt><dd>{{ issued_on }}</dd>
+      {% block meta %}{% endblock %}
+    </dl>
+  </div>
+</header>
+
+<section class="parties">
+  <div class="party">
+    <p class="label">From</p>
+    <p class="name">{{ issuer.name }}</p>
+    {% if issuer.licence %}<p class="line mono">Licence {{ issuer.licence }}</p>{% endif %}
+    {% if issuer.tin %}<p class="line">TIN {{ issuer.tin }}</p>{% endif %}
+    {% if issuer.address %}<p class="line">{{ issuer.address }}</p>{% endif %}
+  </div>
+  <div class="party">
+    <p class="label">To</p>
+    <p class="name">{{ recipient.name }}</p>
+    {% if recipient.licence %}<p class="line mono">Licence {{ recipient.licence }}</p>{% endif %}
+    {% if recipient.tin %}<p class="line">TIN {{ recipient.tin }}</p>{% endif %}
+    {% if recipient.address %}<p class="line">{{ recipient.address }}</p>{% endif %}
+  </div>
+</section>
+
+<main>
+  {% block body %}{% endblock %}
+</main>
+
+<section class="attestation">
+  {% block attestation %}{% endblock %}
+</section>
+
+{% if verification_reference %}
+<section class="verify">
+  <div class="ref">
+    <p class="label">Verification</p>
+    <p class="mono">{{ verification_reference }}</p>
+  </div>
+</section>
+{% endif %}
+
+<footer class="foot">
+  <span class="mono">{{ number }}</span>
+  <span>{{ issuer.name }}</span>
+</footer>
+
+</body>
+</html>

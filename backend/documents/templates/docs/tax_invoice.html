@@ -1,0 +1,71 @@
+{% extends "docs/base_document.html" %}
+{% comment %}
+The legal bill. Tax is printed as it was recorded on the line — exempt
+and zero-rated both charge nothing, but only one lets input VAT be
+reclaimed, so the treatment is shown as a word beside the rate.
+
+The proforma shares this template and differs in one sentence, because
+they are the same statement of value making different demands.
+{% endcomment %}
+
+{% block meta %}
+{% if order_number %}<dt>Order</dt><dd class="mono">{{ order_number }}</dd>{% endif %}
+<dt>Terms</dt><dd>{{ terms }}</dd>
+{% if due_on %}<dt>Due</dt><dd>{{ due_on }}</dd>{% endif %}
+{% endblock %}
+
+{% block body %}
+<section class="section">
+  <h2 class="section-title">Charges · {{ currency }}</h2>
+  <table class="items">
+    <thead>
+      <tr>
+        <th>Description</th>
+        <th class="num">Qty</th>
+        <th class="num">Unit</th>
+        <th>Tax</th>
+        <th class="num">Tax amount</th>
+        <th class="num">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>{{ line.description }}</td>
+        <td class="num">{{ line.quantity }}</td>
+        <td class="num">{{ line.unit_price }}</td>
+        <td>{{ line.tax_treatment }}<span class="sub">{{ line.tax_rate }}</span></td>
+        <td class="num">{{ line.tax_amount }}</td>
+        <td class="num">{{ line.line_total }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <dl>
+      <dt>Subtotal</dt><dd>{{ subtotal }}</dd>
+      <dt>Tax</dt><dd>{{ tax_total }}</dd>
+      <div class="rule"></div>
+      <div class="grand"><dt>Total {{ currency }}</dt><dd>{{ total }}</dd></div>
+      {% if not is_proforma %}
+      <dt>Paid</dt><dd>{{ settled }}</dd>
+      <dt>Outstanding</dt><dd>{{ outstanding }}</dd>
+      {% endif %}
+    </dl>
+  </div>
+</section>
+{% endblock %}
+
+{% block attestation %}
+{% if is_proforma %}
+<p class="note">
+  This is a request for payment, not a tax invoice. Goods are released and a
+  tax invoice issued once payment is received.
+</p>
+{% else %}
+<p class="note">
+  Payment due {{ due_on }}. Quote {{ number }} on the transfer.
+</p>
+{% endif %}
+{% endblock %}

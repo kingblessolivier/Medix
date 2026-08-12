@@ -36,9 +36,10 @@ from commerce.models import (
     PurchaseOrder,
     TradingRelationship,
 )
-from core import sequences
+from core import audit, sequences
 from core.exceptions import DomainError
 from core.models import Organization, User
+from documents import services as documents
 from sales.services import compute_line_tax, resolve_tax_rate
 
 
@@ -205,6 +206,23 @@ def issue_invoice(*, invoice: Invoice, performed_by: User) -> Invoice:
             "modified_by",
             "modified_at",
         ]
+    )
+
+    # Rendered against the invoice as it stands now. The stored context is
+    # what makes the tax rate on this document survive a rule change.
+    documents.issue_invoice(invoice_record=invoice, performed_by=performed_by)
+    audit.record(
+        action="commerce.invoice.issued",
+        subject=invoice,
+        actor=performed_by,
+        after={
+            "number": invoice.number,
+            "kind": invoice.kind,
+            "total": invoice.total,
+            "currency": invoice.currency,
+            "due_on": invoice.due_on,
+        },
+        organization=invoice.organization,
     )
     return invoice
 

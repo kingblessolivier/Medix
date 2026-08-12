@@ -1,0 +1,69 @@
+{% extends "docs/base_document.html" %}
+{% comment %}
+The regulated one, and the one document here that carries a real
+signature block at both ends. The depot's release is attested in-system —
+a named registration, not a drawn line — because it happened in Medix and
+printing an empty line for it would invite a second, unrecorded signature.
+
+The receiving end is blank on purpose: it has not happened yet when this
+prints.
+{% endcomment %}
+
+{% block meta %}
+<dt>Delivery note</dt><dd class="mono">{{ delivery_note }}</dd>
+<dt>Order</dt><dd class="mono">{{ order_number }}</dd>
+{% endblock %}
+
+{% block body %}
+<section class="section">
+  <h2 class="section-title">Scheduled products</h2>
+  <table class="items">
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th>Schedule</th>
+        <th>Batch</th>
+        <th>Expiry</th>
+        <th class="num">Quantity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>{{ line.product }}</td>
+        <td>{{ line.schedule }}</td>
+        <td class="mono">{{ line.batch }}</td>
+        <td class="mono">{{ line.expiry }}</td>
+        <td class="num">{{ line.quantity }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+
+{% block attestation %}
+<p class="label">Chain of custody</p>
+<div class="signatures">
+  <div class="sig">
+    <p class="who">{{ released_by }}</p>
+    <p class="role">Releasing pharmacist · {{ released_registration }}</p>
+    <p class="attested">Released in Medix · {{ released_at }}</p>
+  </div>
+  <div class="sig">
+    {% if received_at %}
+    <p class="who">{{ received_by }}</p>
+    <p class="role">Receiving pharmacist · {{ received_registration }}</p>
+    <p class="attested">Received in Medix · {{ received_at }}</p>
+    {% else %}
+    <p class="rule"></p>
+    <p class="who">Name and council number</p>
+    <p class="role">Receiving pharmacist</p>
+    {% endif %}
+  </div>
+</div>
+<p class="note">
+  Both parties retain a copy. Discrepancies in a scheduled product are reportable
+  to the Rwanda FDA before the goods are shelved.
+</p>
+{% endblock %}

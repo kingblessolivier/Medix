@@ -1,0 +1,8 @@
+{% extends "docs/tax_invoice.html" %}
+{# A proforma and a tax invoice are the same statement of value making
+   different demands, so they share a body and differ only in the
+   attestation, which tax_invoice.html branches on `is_proforma`.
+
+   Kept as its own file because a document kind resolves to a template by
+   name — DocumentKind.PROFORMA must find docs/proforma.html or issuing
+   fails loudly rather than rendering the wrong header. #}
