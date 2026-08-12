@@ -23,6 +23,7 @@ from commerce.models import (
     Availability,
     GoodsReceipt,
     GoodsReceiptStatus,
+    ImportDocument,
     PurchaseOrder,
     PurchaseOrderLine,
     TradingRelationship,
@@ -35,8 +36,10 @@ from commerce.serializers import (
     AddReceiptLineSerializer,
     DispatchSerializer,
     GoodsReceiptSerializer,
+    ImportDocumentSerializer,
     ImportTransferSerializer,
     MarketplaceRowSerializer,
+    ReleaseBatchSerializer,
     PublishListingSerializer,
     PurchaseOrderSerializer,
     SetPriceTiersSerializer,
@@ -48,7 +51,6 @@ from commerce.serializers import (
 from core.exceptions import DomainError, RegistrationInvalid
 from core.quantity import compose
 from core.models import Organization, PharmacistRegistration
-from inventory import services as inventory
 from inventory.models import Batch, Location
 
 
@@ -659,3 +661,64 @@ class CapabilityView(APIView):
                 ],
             }
         )
+
+
+class ImportDocumentViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Importation paper, filed against the receipt it covers.
+
+    Two of these are gates rather than filing — see
+    `commerce.services._quarantine_reason`. A Certificate of Analysis
+    releases a batch; a cold-chain log with a breach holds one.
+    """
+
+    serializer_class = ImportDocumentSerializer
+
+    def get_queryset(self):
+        queryset = ImportDocument.tenant_objects.select_related("batch", "receipt")
+        receipt = self.request.query_params.get("receipt")
+        if receipt:
+            queryset = queryset.filter(receipt_id=receipt)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization,
+            created_by=self.request.user,
+        )
+
+    @action(detail=True, methods=["post"])
+    def verify(self, request, pk=None):
+        """Somebody looked at it and says it is what it claims to be.
+
+        Separate from upload: holding a file is not the same as having
+        checked it, and a gate that opens on upload alone would be a gate
+        anyone can walk through with a blank page.
+        """
+        document = self.get_object()
+        document.verified_by = request.user
+        document.verified_at = timezone.now()
+        document.save(update_fields=["verified_by", "verified_at", "modified_at"])
+        return Response(ImportDocumentSerializer(document).data)
+
+
+class BatchReleaseView(APIView):
+    """Release quarantined stock, with a reason on the record."""
+
+    def post(self, request):
+        payload = ReleaseBatchSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        services.release_batch(
+            batch=get_object_or_404(Batch.tenant_objects, pk=data["batch"]),
+            location=get_object_or_404(Location.tenant_objects, pk=data["location"]),
+            organization=request.user.organization,
+            performed_by=request.user,
+            reason=data["reason"],
+        )
+        return Response({"released": True})

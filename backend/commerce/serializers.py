@@ -7,6 +7,7 @@ from rest_framework import serializers
 from commerce.models import (
     GoodsReceipt,
     GoodsReceiptLine,
+    ImportDocument,
     OrderEvent,
     PriceTier,
     PurchaseOrder,
@@ -486,3 +487,48 @@ class TradingRelationshipSerializer(serializers.ModelSerializer):
             "verified_at",
             "is_active",
         ]
+
+
+class ImportDocumentSerializer(serializers.ModelSerializer):
+    """Importation paper, filed against what it covers."""
+
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+    is_verified = serializers.BooleanField(read_only=True)
+    batch_number = serializers.CharField(
+        source="batch.batch_number", read_only=True, default=""
+    )
+
+    class Meta:
+        model = ImportDocument
+        fields = [
+            "id",
+            "kind",
+            "kind_label",
+            "receipt",
+            "batch",
+            "batch_number",
+            "number",
+            "issued_by",
+            "issued_on",
+            "expires_on",
+            "file",
+            "is_verified",
+            "verified_at",
+            "min_temperature_c",
+            "max_temperature_c",
+            "breach",
+        ]
+        read_only_fields = ["verified_at"]
+
+
+class ReleaseBatchSerializer(serializers.Serializer):
+    """Quarantined stock, moved to available with a recorded reason.
+
+    The reason is required. A release nobody has to justify is not a
+    control, and quarantine only means something if leaving it costs a
+    sentence.
+    """
+
+    batch = serializers.UUIDField()
+    location = serializers.UUIDField()
+    reason = serializers.CharField(max_length=500)

@@ -30,13 +30,13 @@ from django.utils import timezone
 
 from core import audit
 from core.exceptions import DomainError
-from core.models import Organization, TenantModel, User
-
-
-class Severity(models.TextChoices):
-    CRITICAL = "CRITICAL", "Critical"
-    WARNING = "WARNING", "Warning"
-    INFO = "INFO", "Info"
+from core.models import (
+    AlertAcknowledgement,
+    AlertRule,
+    Organization,
+    Severity,
+    User,
+)
 
 
 @dataclass(frozen=True)
@@ -88,35 +88,6 @@ def about(subject, **kwargs) -> Alert:
 # --------------------------------------------------------------------------
 # Effective-dated thresholds
 # --------------------------------------------------------------------------
-
-
-class AlertRule(TenantModel):
-    """The number an alert fires at, with the dates it applied between.
-
-    Ninety days before expiry and eighty percent of a credit limit are
-    both policy decisions, and policy in this system is versioned
-    configuration rather than a literal in a service. A pharmacy that
-    tightens its short-dated window to 120 days must not retroactively
-    make last quarter's decisions look negligent.
-    """
-
-    code = models.CharField(max_length=60)
-    severity = models.CharField(max_length=10, choices=Severity.choices)
-    #: Shape depends on the code — `{"days": 90}`, `{"percent": 80}`.
-    #: A column per threshold would be mostly nulls and a migration per
-    #: new alert.
-    threshold = models.JSONField(default=dict)
-    is_active = models.BooleanField(default=True)
-
-    effective_from = models.DateField(default=timezone.localdate)
-    effective_to = models.DateField(null=True, blank=True)
-
-    class Meta:
-        db_table = "core_alert_rule"
-        indexes = [models.Index(fields=["organization", "code", "effective_from"])]
-
-    def __str__(self) -> str:
-        return f"{self.code} from {self.effective_from}"
 
 
 #: Used when an organization has configured nothing. Every value here is
@@ -217,35 +188,6 @@ _BLOCKING_EXCEPTIONS: dict[str, type[DomainError]] = {}
 def blocks_with(code: str, exception: type[DomainError]) -> None:
     """Register the exception a critical alert raises."""
     _BLOCKING_EXCEPTIONS[code] = exception
-
-
-class AlertAcknowledgement(TenantModel):
-    """Who accepted which warning, on which record, and why.
-
-    An override nobody can trace is not a control, so this is written as
-    a row *and* mirrored into the audit stream. Two records because they
-    answer different questions: this one is "was it acknowledged", the
-    audit event is "what happened here, in order".
-    """
-
-    code = models.CharField(max_length=60)
-    severity = models.CharField(max_length=10, choices=Severity.choices)
-    subject_type = models.CharField(max_length=80, blank=True)
-    subject_id = models.UUIDField(null=True, blank=True)
-    detail = models.TextField(blank=True)
-    reason = models.TextField(blank=True)
-    acknowledged_by = models.ForeignKey(
-        "core.User", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
-    )
-    acknowledged_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = "core_alert_acknowledgement"
-        ordering = ["-acknowledged_at"]
-        indexes = [models.Index(fields=["subject_type", "subject_id"])]
-
-    def __str__(self) -> str:
-        return f"{self.code} by {self.acknowledged_by}"
 
 
 def enforce(

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from django.utils import timezone
 
-from core.money import MINOR_UNITS, Money
+from core.money import Money
 from core.quantity import from_base
 
 

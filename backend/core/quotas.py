@@ -25,44 +25,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from core.alerts import Alert, Severity, about, rule_for
-from core.models import Organization, TenantModel
-
-
-class QuotaPeriod(models.TextChoices):
-    MONTH = "MONTH", "Calendar month"
-    QUARTER = "QUARTER", "Calendar quarter"
-    YEAR = "YEAR", "Calendar year"
-
-
-class ControlledQuota(TenantModel):
-    """How much of one schedule this organization may move in a period.
-
-    Zero is not "none allowed" — it is "no quota recorded", and the check
-    does not apply. A pharmacy with no quota on file is one the regulator
-    has not capped, not one barred from trading.
-    """
-
-    schedule = models.CharField(max_length=20)
-    period = models.CharField(
-        max_length=10, choices=QuotaPeriod.choices, default=QuotaPeriod.MONTH
-    )
-    #: In base units of the product, summed across products in the
-    #: schedule. Base units because a schedule spans dosage forms and
-    #: "200 packs" means nothing across tablets and ampoules.
-    limit_base = models.BigIntegerField(default=0)
-    authority_reference = models.CharField(max_length=60, blank=True)
-
-    effective_from = models.DateField(default=timezone.localdate)
-    effective_to = models.DateField(null=True, blank=True)
-
-    class Meta:
-        db_table = "core_controlled_quota"
-        indexes = [
-            models.Index(fields=["organization", "schedule", "effective_from"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.schedule} {self.limit_base} per {self.get_period_display().lower()}"
+from core.models import ControlledQuota, Organization, QuotaPeriod
 
 
 @dataclass(frozen=True)

@@ -12,9 +12,9 @@ from datetime import date, timedelta
 
 import pytest
 
-from catalog.models import LegalStatus, TaxTreatment
+from catalog.models import TaxTreatment
 from commerce import invoicing, services
-from commerce.models import InvoiceKind, TradingRelationship
+from commerce.models import TradingRelationship
 from core.exceptions import DomainError
 from core.models import (
     AuditEvent,
@@ -28,7 +28,7 @@ from core.quantity import Quantity
 from documents import services as documents
 from documents.models import DocumentKind
 from finance import reports, services as finance
-from finance.models import Expense, ExpenseCategory, WriteOff, WriteOffReason
+from finance.models import ExpenseCategory, WriteOffReason
 from inventory import services as inventory
 from inventory.models import MovementKind
 from inventory.tests.factories import make_batch, make_location, make_org, make_product, uom

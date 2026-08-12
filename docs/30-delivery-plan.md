@@ -13,9 +13,42 @@ and the finance model), `docs/29-alerts.md` (warnings),
 
 ---
 
+> **Status: stages 1–12 are built.** What follows is the record of what
+> each stage did and why, kept because the reasoning is the part worth
+> having later. Everything still open is in *Decisions needed from you*
+> at the foot of this document, plus clinical alerts, which are blocked
+> rather than unbuilt.
+
+---
+
 ## Where this actually stands
 
-Honest state, not a summary of intentions. **343 tests passing.**
+Honest state, not a summary of intentions.
+
+| Stage | State | Notes |
+|---|---|---|
+| 1 Product range and images | **built** | |
+| 2 Cart with unit selection | **built** | |
+| 3 Depot inbound recording | **built** | |
+| 4 Payment terms and credit | **built** | |
+| 5A Audit spine | **built** | `core/audit.py`; every transition writes |
+| 5B Order timeline | **built** | `OrderEvent`, both sides read it |
+| 5C Document pipeline | **built** | HTML issued and hashed; PDF behind a setting |
+| 5D Dispatch logistics | **built** | carrier, vehicle, driver, signature |
+| 5E Controlled transfer gate | **built** | hard stop before the ledger moves |
+| 6 Transfer payload | **built** | seeds the buyer's draft receipt |
+| 7 Alerts | **built** | clinical half blocked — see below |
+| 8 Finance | **built** | computed per range, never stored as periods |
+| 9 Dashboards | **built** | four tiles, four charts, table view on each |
+| 10 Volume tiers and SRP | **built** | |
+| 11 Controlled quotas and extract | **built** | |
+| 12 Import documents | **built** | CoA releases a batch, a breach holds one |
+
+**Not built, and blocked rather than pending:** clinical alerts.
+`docs/29` §3.1 needs licensed reference data; §3.2 needs the decision at
+the foot of this page.
+
+The baseline this began from — **343 tests passing.**
 
 | Area | What works today |
 |---|---|
@@ -562,4 +595,52 @@ These block work rather than slow it.
 6. **Playwright in the deployment target.** Headless Chromium needs
    ~400MB and specific system libraries. If the target cannot carry it,
    the fallback is WeasyPrint — which changes what `docs/18` can promise
-   about web-preview parity. *Blocks stage 5C.*
+   about web-preview parity.
+
+   *No longer blocking.* Stage 5C shipped with rendering split: HTML is
+   always produced, stored on the row and hashed, so preview, parity and
+   the determinism test all work today. PDF comes from whichever backend
+   `DOCUMENT_PDF_BACKEND` names, and from none if none is configured — a
+   document without a PDF is still issued, numbered and immutable, and
+   can be back-filled from its stored context once the target is
+   settled. The decision now changes one setting rather than one stage.
+
+---
+
+## What was learned along the way
+
+Four things the plan did not anticipate, recorded because they are the
+kind of thing that gets rediscovered expensively.
+
+**`AuditEvent` had never been written to.** The table, the append-only
+grants and the revoked update path had all been in place since Phase 0,
+and no service had ever inserted a row. Infrastructure that is never
+exercised is indistinguishable from infrastructure that does not work.
+
+**Ties in `occurred_at` are real.** Two transitions in the same
+millisecond tie, and the database is then free to return them in either
+order — which showed up as a test passing alone and failing in a full
+run. Both the audit history and the order timeline now sort by id as
+well as time; the id is a uuid7, so it breaks the tie the way a reader
+expects.
+
+**Moving credit under the alert framework changed what callers catch.**
+The wire `code` was identical either way, but the Python exception class
+was not. A small registry maps blocking alert codes to their named
+exceptions, so `CreditLimitExceeded` stays catchable.
+
+**Pre-filling and correcting are not the same feature.** The advance
+notice seeds the buyer's goods receipt, but the first cut posted the
+seeded lines as-is — which would have made a short delivery invisible,
+the exact failure the GRN exists to catch. Posting now clears the seeded
+lines and rewrites them from what the receiver counted.
+
+**A model outside `models.py` may never be registered.** `AlertRule`,
+`AlertAcknowledgement` and `ControlledQuota` were first declared beside
+their logic in `core/alerts.py` and `core/quotas.py`. Django registers a
+model when the module defining it is imported, and those modules are
+imported lazily by whichever service needs them — so the app registry
+came to depend on import order. It surfaced as the test-database flush
+failing to truncate `core_organization`, because a table Django did not
+know about was holding a foreign key into it. The tables are declared in
+`core/models.py` now; the behaviour stayed where it was.

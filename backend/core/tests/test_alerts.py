@@ -8,7 +8,6 @@ difference only shows up in an argument with a regulator.
 from datetime import date, timedelta
 
 import pytest
-from django.utils import timezone
 
 from core import alerts
 from core.alerts import (
@@ -230,7 +229,8 @@ class TestShortDatedBoundary:
     def test_a_batch_with_no_stock_left_is_not_a_warning(self, org):
         """History, not a warning. Warning about it teaches clicking through."""
         product = make_product(org, "Gone")
-        location = make_location(org, "Store", "GONE")
+        # A batch with an expiry but no movement: no balance row exists,
+        # so there is nothing to warn about.
         make_batch(org, product, number="EMPTY", expires_in_days=30)
         assert inventory_checks.short_dated_batches(organization=org) == []
 

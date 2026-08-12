@@ -29,12 +29,10 @@ import hashlib
 import json
 
 from django.db import transaction
-from django.utils import timezone
 
 from catalog import services as catalog
 from commerce.models import (
     GoodsReceipt,
-    GoodsReceiptStatus,
     PurchaseOrder,
     Shipment,
 )

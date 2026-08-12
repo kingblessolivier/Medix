@@ -7,7 +7,7 @@ or dispatch — this is that check, at the two points where it matters.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 from django.utils import timezone
 

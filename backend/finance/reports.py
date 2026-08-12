@@ -116,7 +116,7 @@ def capital_invested(*, organization: Organization, start: date, end: date) -> i
     real money spent acquiring the goods. `post_receipt` apportions them
     into the batch, and `landed_cost_share` records each line's part.
     """
-    from commerce.models import GoodsReceipt, GoodsReceiptLine, GoodsReceiptStatus
+    from commerce.models import GoodsReceiptLine, GoodsReceiptStatus
 
     lines = GoodsReceiptLine.objects.filter(
         receipt__organization=organization,
@@ -447,7 +447,6 @@ def inventory_health(
     decision is actually made about, and velocity needs a longer history
     than a new deployment has.
     """
-    from datetime import timedelta
 
     from django.utils import timezone
 

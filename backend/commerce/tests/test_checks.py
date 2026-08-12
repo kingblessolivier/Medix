@@ -9,7 +9,7 @@ from datetime import date, timedelta
 import pytest
 
 from commerce import checks, invoicing, services
-from commerce.models import InvoiceKind, InvoiceStatus, TradingRelationship
+from commerce.models import InvoiceKind, TradingRelationship
 from core.alerts import AcknowledgementRequired, Severity
 from core.exceptions import LicenceInvalid
 from core.models import (

@@ -13,13 +13,13 @@ import hashlib
 import logging
 from datetime import date
 
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
 from catalog import checks as catalog_checks
 from catalog.models import LegalStatus, Product, UnitOfMeasure
-from commerce import checks, invoicing
+from commerce import checks
 from core import alerts, audit, quotas, sequences
 from core.capabilities import Capability, require_capability
 from core.exceptions import DomainError, InsufficientStock
@@ -33,6 +33,7 @@ from commerce.models import (
     GoodsReceipt,
     GoodsReceiptLine,
     GoodsReceiptStatus,
+    ImportDocumentKind,
     OrderEvent,
     PriceTier,
     PurchaseOrder,
@@ -1054,6 +1055,109 @@ def apportion_landed_cost(receipt: GoodsReceipt) -> dict[str, int]:
     return {str(line.id): share.amount for line, share in zip(lines, shares)}
 
 
+def _quarantine_reason(*, receipt: GoodsReceipt, line, batch) -> tuple[bool, str]:
+    """Whether this batch is held on arrival, and why.
+
+    Three reasons, in the order they matter:
+
+    1. **A recorded cold-chain breach.** The log says the consignment left
+       its range in transit. Not a warning — by the time anyone reads a
+       warning the product is already damaged.
+    2. **A cold-chain delivery whose temperature was not confirmed** at
+       the door. Unconfirmed is not the same as fine.
+    3. **A regulated product with no Certificate of Analysis.** Nobody
+       can say the batch met specification, and a batch nobody has tested
+       is not stock, it is a liability.
+    """
+    breached = receipt.import_documents.filter(
+        kind=ImportDocumentKind.COLD_CHAIN_LOG, breach=True
+    ).exists()
+    if breached:
+        return True, "Cold-chain excursion recorded in transit"
+
+    if line.product.cold_chain and receipt.transport_temperature_ok is False:
+        return True, "Temperature breach on delivery"
+
+    # Only a registered medicine needs one. Consumables and cosmetics have
+    # no registration, and holding every box of plasters for a certificate
+    # nobody issues would empty the shelves rather than protect anyone.
+    needs_coa = getattr(line.product, "registration", None) is not None
+    if needs_coa:
+        has_coa = receipt.import_documents.filter(
+            kind=ImportDocumentKind.CERTIFICATE_OF_ANALYSIS
+        ).filter(models.Q(batch=batch) | models.Q(batch__isnull=True)).exists()
+        # An import receipt is one raised against a foreign consignment;
+        # a domestic delivery from a local depot carries the depot's own
+        # release, not a manufacturer's certificate.
+        is_import = receipt.invoice_currency != "RWF" or receipt.landed_charges > 0
+        if is_import and not has_coa:
+            return True, "No certificate of analysis on file for this batch"
+
+    return False, ""
+
+
+@transaction.atomic
+def release_batch(
+    *,
+    batch,
+    location: Location,
+    organization: Organization,
+    performed_by: User,
+    reason: str,
+) -> None:
+    """Move quarantined stock into available, with a recorded reason.
+
+    Two movements rather than a status update, because the ledger is the
+    record: a batch that was held and then released has a history, and
+    an in-place edit would erase the fact that it was ever in doubt.
+    """
+    if not reason.strip():
+        raise DomainError("Give a reason for the release.", code="reason_required")
+
+    held = inventory.balance_for(
+        organization=organization,
+        product=batch.product,
+        location=location,
+        status=StockStatus.QUARANTINED,
+    )
+    if held <= 0:
+        raise DomainError("Nothing is quarantined here.", code="nothing_quarantined")
+
+    quantity = from_base(held, batch.product.base_uom)
+    inventory.post_movement(
+        organization=organization,
+        location=location,
+        batch=batch,
+        kind=MovementKind.RELEASE,
+        quantity=-quantity,
+        performed_by=performed_by,
+        status=StockStatus.QUARANTINED,
+        reason=reason.strip(),
+    )
+    inventory.post_movement(
+        organization=organization,
+        location=location,
+        batch=batch,
+        kind=MovementKind.RELEASE,
+        quantity=quantity,
+        performed_by=performed_by,
+        status=StockStatus.AVAILABLE,
+        reason=reason.strip(),
+    )
+    audit.record(
+        action="inventory.batch.released",
+        subject=batch,
+        actor=performed_by,
+        after={
+            "batch": batch.batch_number,
+            "quantity_base": held,
+            "location": location.name,
+            "reason": reason.strip(),
+        },
+        organization=organization,
+    )
+
+
 @transaction.atomic
 def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
     """Create the batches and move the stock.
@@ -1103,6 +1207,7 @@ def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
         line.batch = batch
         line.save(update_fields=["batch", "landed_cost_share"])
 
+        held, reason = _quarantine_reason(receipt=receipt, line=line, batch=batch)
         inventory.post_movement(
             organization=receipt.organization,
             location=receipt.location,
@@ -1111,18 +1216,10 @@ def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
             quantity=Quantity(line.accepted, line.uom),
             performed_by=performed_by,
             reference=receipt.number,
-            # A cold-chain delivery that arrived warm is quarantined, not
-            # accepted — releasing it is a separate, deliberate decision.
-            status=(
-                StockStatus.QUARANTINED
-                if line.product.cold_chain and receipt.transport_temperature_ok is False
-                else StockStatus.AVAILABLE
-            ),
-            reason=(
-                "Temperature breach on delivery"
-                if line.product.cold_chain and receipt.transport_temperature_ok is False
-                else ""
-            ),
+            # Quarantine is the default for anything unproven. Releasing
+            # it is a separate, deliberate, recorded decision.
+            status=StockStatus.QUARANTINED if held else StockStatus.AVAILABLE,
+            reason=reason,
         )
 
         if line.order_line is not None:

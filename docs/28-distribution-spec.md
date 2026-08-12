@@ -355,23 +355,26 @@ In order, largest domain risk first.
 2. ~~Storage and handling — temperature range, light, moisture~~ **built**
 3. ~~Product range: sexual health, baby care, first aid, oral care~~ **built**
 4. ~~Payment terms on the order; credit limit enforced at approval~~ **built**
-5. Audit spine — `core.AuditEvent` exists and **nothing writes to it**
-6. Order timeline, visible to both sides
-7. Document rendering pipeline; picking ticket and commercial tax invoice
-8. Transfer payload emitted on dispatch, consumed on receipt
-9. Alerts framework — §29, severity enforced in the service layer
-10. Period financial report — §12.4, for an arbitrary date range
-11. Expense recording, credit notes, write-off certificates, ageing
-12. Financial dashboard — §12.5
-13. Volume discount tiers and SRP
-14. Reorder point alerting (the field exists; nothing reads it)
-15. Controlled substance transfer form
-16. Import documents (Phase 4)
+5. ~~Audit spine — `core/audit.py`, every transition wired~~ **built**
+6. ~~Order timeline, visible to both sides~~ **built**
+7. ~~Document pipeline; picking ticket, tax invoice, GRN, transfer form~~ **built**
+8. ~~Transfer payload emitted on dispatch, consumed on receipt~~ **built**
+9. ~~Alerts framework — severity enforced in the service layer~~ **built**
+10. ~~Period financial report — §12.4, for an arbitrary date range~~ **built**
+11. ~~Expense recording, credit notes, write-off certificates, ageing~~ **built**
+12. ~~Financial dashboard — §12.5~~ **built**
+13. ~~Volume discount tiers and SRP~~ **built**
+14. ~~Reorder point alerting~~ **built**
+15. ~~Controlled substance transfer form, and quotas~~ **built**
+16. ~~Import documents, CoA batch gate, cold-chain quarantine~~ **built**
 
-Items 1–4 have landed. Item 5 is new and moved to the front of the queue:
-the audit table has been in place since Phase 0 with append-only grants,
-and no service has ever written a row to it. Alert acknowledgement,
-document attestation and any regulator extract all rest on it.
+The queue is clear. What remains is not in this document:
 
-`docs/30-delivery-plan.md` stages the rest with the model and service
-surface spelled out.
+- **Clinical alerts** — §3.1 of `docs/29` needs licensed reference data,
+  and §3.2 (interaction checking) is blocked on a decision, not on
+  effort.
+- **PDF rendering** — HTML is issued, stored and hashed today. Turning on
+  `DOCUMENT_PDF_BACKEND=playwright` needs the deployment target settled.
+- The four other open decisions in `docs/30`.
+
+`docs/30-delivery-plan.md` records what each stage did.

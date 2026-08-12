@@ -613,6 +613,94 @@ class ShipmentLine(BaseModel):
         return f"{self.product.name} {self.batch_number}"
 
 
+class ImportDocumentKind(models.TextChoices):
+    """The paper a consignment must carry to enter the country legally.
+
+    Two of these are gates rather than filing. A **Certificate of
+    Analysis** is per batch and blocks release: without it nobody can say
+    the batch met specification, and a batch nobody has tested is not
+    stock, it is a liability. A **cold-chain log** with a breach
+    quarantines rather than warns, because by the time anyone reads a
+    warning the product is already damaged.
+    """
+
+    IMPORT_LICENCE = "IMPORT_LICENCE", "Import licence or permit"
+    PROFORMA_INVOICE = "PROFORMA_INVOICE", "Proforma invoice"
+    COMMERCIAL_INVOICE = "COMMERCIAL_INVOICE", "Commercial invoice"
+    PACKING_LIST = "PACKING_LIST", "Packing list"
+    BILL_OF_LADING = "BILL_OF_LADING", "Bill of lading or air waybill"
+    CERTIFICATE_OF_ANALYSIS = "CERTIFICATE_OF_ANALYSIS", "Certificate of analysis"
+    CERTIFICATE_OF_ORIGIN = "CERTIFICATE_OF_ORIGIN", "Certificate of origin"
+    CUSTOMS_DECLARATION = "CUSTOMS_DECLARATION", "Customs import declaration"
+    COLD_CHAIN_LOG = "COLD_CHAIN_LOG", "Cold-chain temperature log"
+
+
+class ImportDocument(TenantModel):
+    """One piece of importation paper, filed against what it covers.
+
+    Attached to the receipt, and additionally to a batch where the
+    document is batch-specific — a Certificate of Analysis covers one
+    manufactured lot, not a consignment, and filing it at consignment
+    level loses exactly the granularity a recall needs.
+
+    The file is stored rather than the data transcribed: these are
+    third-party documents and what a customs officer asks to see is the
+    original, not our summary of it.
+    """
+
+    kind = models.CharField(max_length=30, choices=ImportDocumentKind.choices)
+    receipt = models.ForeignKey(
+        GoodsReceipt, on_delete=models.PROTECT, related_name="import_documents"
+    )
+    #: Set only for batch-specific documents — a CoA, principally.
+    batch = models.ForeignKey(
+        "inventory.Batch",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="import_documents",
+    )
+
+    number = models.CharField(max_length=60, blank=True)
+    issued_by = models.CharField(max_length=200, blank=True, help_text="Issuing party")
+    issued_on = models.DateField(null=True, blank=True)
+    expires_on = models.DateField(null=True, blank=True)
+    file = models.FileField(upload_to="imports/%Y/%m/", null=True, blank=True)
+
+    #: Somebody looked at it and said it is what it claims to be. Holding
+    #: a file is not the same as having checked it.
+    verified_by = models.ForeignKey(
+        "core.User", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    # -- cold chain only ---------------------------------------------------
+    #: A breach quarantines the batch. Recorded as facts rather than as a
+    #: single boolean so the excursion can be reported to the regulator.
+    min_temperature_c = models.DecimalField(
+        max_digits=4, decimal_places=1, null=True, blank=True
+    )
+    max_temperature_c = models.DecimalField(
+        max_digits=4, decimal_places=1, null=True, blank=True
+    )
+    breach = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "commerce_import_document"
+        ordering = ["kind"]
+        indexes = [
+            models.Index(fields=["organization", "kind"]),
+            models.Index(fields=["receipt", "kind"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} {self.number}".strip()
+
+    @property
+    def is_verified(self) -> bool:
+        return self.verified_at is not None
+
+
 class ControlledTransfer(TenantModel):
     """Chain of custody for scheduled drugs, signed at both ends.
 
