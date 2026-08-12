@@ -42,9 +42,9 @@ from commerce.serializers import (
     StartReceiptSerializer,
     TradingRelationshipSerializer,
 )
-from core.exceptions import DomainError
+from core.exceptions import DomainError, RegistrationInvalid
 from core.quantity import compose
-from core.models import Organization
+from core.models import Organization, PharmacistRegistration
 from inventory import services as inventory
 from inventory.models import Batch, Location
 
@@ -207,7 +207,12 @@ class PurchaseOrderViewSet(
                 models_or(org_id)
             )
             .select_related("supplier", "organization", "deliver_to")
-            .prefetch_related("lines__product", "lines__uom")
+            .prefetch_related(
+                "lines__product",
+                "lines__uom",
+                "events__actor",
+                "events__actor_organization",
+            )
             .distinct()
         )
 
@@ -291,15 +296,30 @@ class PurchaseOrderViewSet(
         payload = DispatchSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
 
+        data = payload.validated_data
         from_location = get_object_or_404(
             Location.objects.filter(organization=request.user.organization),
-            pk=payload.validated_data["from_location"],
+            pk=data["from_location"],
         )
+        registration = None
+        if data.get("controlled_transfer"):
+            registration = get_object_or_404(
+                PharmacistRegistration.tenant_objects, pk=data["controlled_transfer"]
+            )
+            if not registration.is_valid:
+                raise RegistrationInvalid(
+                    f"Registration {registration.council_number} is not current."
+                )
+
         shipment = services.dispatch_order(
             order=self.get_object(),
             from_location=from_location,
             performed_by=request.user,
-            carrier=payload.validated_data.get("carrier", ""),
+            carrier=data.get("carrier", ""),
+            vehicle_registration=data.get("vehicle_registration", ""),
+            driver_name=data.get("driver_name", ""),
+            driver_licence=data.get("driver_licence", ""),
+            controlled_transfer=registration,
         )
         return Response(ShipmentSerializer(shipment).data, status=status.HTTP_201_CREATED)
 

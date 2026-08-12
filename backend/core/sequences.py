@@ -32,6 +32,12 @@ PREFIXES = {
     "QUOTATION": "QUO",
     "DISPOSAL": "DSP",
     "RECALL": "REC",
+    "PICKING_TICKET": "PT",
+    # Signed by a pharmacist at each end. A gap here is the finding this
+    # module exists to prevent.
+    "CONTROLLED_TRANSFER": "CST",
+    "DEBIT_NOTE": "DBN",
+    "WRITE_OFF": "WO",
 }
 
 

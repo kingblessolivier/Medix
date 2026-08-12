@@ -31,6 +31,7 @@ import {
   type Tone,
 } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
+import { OrderTimeline } from "./OrderTimeline";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
 const DAY = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" });
@@ -95,9 +96,13 @@ const VIEWS: { id: string; label: string; icon: typeof List; match?: string[] }[
 export function OrdersScreen({
   canSupply,
   locationId,
+  organizationId,
 }: {
   canSupply: boolean;
   locationId: string | null;
+  /** The reader's own organization, so their side of the timeline reads
+      as "You" rather than as the counterparty. */
+  organizationId?: string;
 }) {
   const queryClient = useQueryClient();
   const [side, setSide] = useState<"placed" | "received">(canSupply ? "received" : "placed");
@@ -326,6 +331,7 @@ export function OrdersScreen({
         onSubmit={() => selected && submit.mutate(selected.id)}
         onDispatch={() => selected && dispatch.mutate(selected.id)}
         busy={confirm.isPending || submit.isPending || dispatch.isPending}
+        viewerOrganization={organizationId}
       />
     </>
   );
@@ -384,6 +390,7 @@ function OrderModal({
   onSubmit,
   onDispatch,
   busy,
+  viewerOrganization,
 }: {
   order: PurchaseOrder | null;
   side: "placed" | "received";
@@ -392,6 +399,7 @@ function OrderModal({
   onSubmit: () => void;
   onDispatch: () => void;
   busy: boolean;
+  viewerOrganization?: string;
 }) {
   if (!order) return null;
   const status = STATUS[order.status] ?? STATUS.DRAFT;
@@ -461,6 +469,12 @@ function OrderModal({
         density="compact"
         caption={`Items on ${order.number || "this order"}`}
         emptyHeading="No items"
+      />
+
+      <h3 className="mb-3 mt-6 text-section font-semibold">History</h3>
+      <OrderTimeline
+        events={order.events ?? []}
+        viewerOrganization={viewerOrganization}
       />
     </Modal>
   );

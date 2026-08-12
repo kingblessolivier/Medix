@@ -353,17 +353,25 @@ In order, largest domain risk first.
 
 1. ~~`Manufacturer` model; dosage form, strength, route on `Product`~~ **built**
 2. ~~Storage and handling — temperature range, light, moisture~~ **built**
-3. Product range: sexual health, baby care, first aid, oral care
-4. Payment terms on the order; credit limit enforced at approval
-5. Period financial report — §12.4, for an arbitrary date range
-6. Transfer payload emitted on dispatch, consumed on receipt
-7. Picking ticket and commercial tax invoice
-8. Expense recording, then receivables ageing
-9. Financial dashboard — §12.5
-10. Volume discount tiers and SRP
-11. Reorder point alerting (the field exists; nothing reads it)
-12. Controlled substance transfer form
-13. Import documents (Phase 4)
+3. ~~Product range: sexual health, baby care, first aid, oral care~~ **built**
+4. ~~Payment terms on the order; credit limit enforced at approval~~ **built**
+5. Audit spine — `core.AuditEvent` exists and **nothing writes to it**
+6. Order timeline, visible to both sides
+7. Document rendering pipeline; picking ticket and commercial tax invoice
+8. Transfer payload emitted on dispatch, consumed on receipt
+9. Alerts framework — §29, severity enforced in the service layer
+10. Period financial report — §12.4, for an arbitrary date range
+11. Expense recording, credit notes, write-off certificates, ageing
+12. Financial dashboard — §12.5
+13. Volume discount tiers and SRP
+14. Reorder point alerting (the field exists; nothing reads it)
+15. Controlled substance transfer form
+16. Import documents (Phase 4)
 
-Items 1 and 2 landed with this document. The rest is the queue, in the
-order the domain risk falls.
+Items 1–4 have landed. Item 5 is new and moved to the front of the queue:
+the audit table has been in place since Phase 0 with append-only grants,
+and no service has ever written a row to it. Alert acknowledgement,
+document attestation and any regulator extract all rest on it.
+
+`docs/30-delivery-plan.md` stages the rest with the model and service
+surface spelled out.

@@ -7,8 +7,10 @@ from rest_framework import serializers
 from commerce.models import (
     GoodsReceipt,
     GoodsReceiptLine,
+    OrderEvent,
     PurchaseOrder,
     PurchaseOrderLine,
+    PurchaseOrderStatus,
     Shipment,
     ShipmentLine,
     TradingRelationship,
@@ -167,8 +169,45 @@ class PurchaseOrderLineSerializer(serializers.ModelSerializer):
         ]
 
 
+class OrderEventSerializer(serializers.ModelSerializer):
+    """One step of the timeline, as both sides see it.
+
+    The actor's name is exposed but never their username or address —
+    the counterparty is entitled to know who moved the order, not to
+    profile the other pharmacy's staff.
+    """
+
+    actor_name = serializers.SerializerMethodField()
+    actor_organization_name = serializers.CharField(
+        source="actor_organization.name", read_only=True, default=""
+    )
+    to_status_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderEvent
+        fields = [
+            "id",
+            "from_status",
+            "to_status",
+            "to_status_label",
+            "actor_name",
+            "actor_organization",
+            "actor_organization_name",
+            "occurred_at",
+            "note",
+            "document_number",
+        ]
+
+    def get_actor_name(self, event) -> str:
+        return str(event.actor) if event.actor_id else ""
+
+    def get_to_status_label(self, event) -> str:
+        return PurchaseOrderStatus(event.to_status).label
+
+
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     lines = PurchaseOrderLineSerializer(many=True, read_only=True)
+    events = OrderEventSerializer(many=True, read_only=True)
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
     buyer_name = serializers.CharField(source="organization.name", read_only=True)
     deliver_to_name = serializers.CharField(source="deliver_to.name", read_only=True)
@@ -187,10 +226,12 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "required_by",
             "subtotal",
             "currency",
+            "payment_terms_days",
             "submitted_at",
             "confirmed_at",
             "created_at",
             "lines",
+            "events",
         ]
 
 
@@ -230,6 +271,12 @@ class ShipmentSerializer(serializers.ModelSerializer):
             "from_location",
             "from_location_name",
             "carrier",
+            "vehicle_registration",
+            "driver_name",
+            "driver_licence",
+            "received_by_name",
+            "received_by_registration",
+            "received_at",
             "dispatched_at",
             "lines",
         ]
@@ -238,6 +285,14 @@ class ShipmentSerializer(serializers.ModelSerializer):
 class DispatchSerializer(serializers.Serializer):
     from_location = serializers.UUIDField()
     carrier = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    vehicle_registration = serializers.CharField(
+        max_length=20, required=False, allow_blank=True
+    )
+    driver_name = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    driver_licence = serializers.CharField(max_length=40, required=False, allow_blank=True)
+    #: The releasing pharmacist's registration. Required only when a line
+    #: is controlled; the service is what enforces that, not this shape.
+    controlled_transfer = serializers.UUIDField(required=False, allow_null=True)
 
 
 class StartOrderSerializer(serializers.Serializer):

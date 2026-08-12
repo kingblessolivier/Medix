@@ -337,6 +337,21 @@ export type OrderLine = {
   undispatched_base: number;
 };
 
+/* One step of the order's history. Both parties read the same rows —
+   this is the sanitised half of the audit trail, not the internal one. */
+export type OrderEvent = {
+  id: string;
+  from_status: string;
+  to_status: string;
+  to_status_label: string;
+  actor_name: string;
+  actor_organization: string | null;
+  actor_organization_name: string;
+  occurred_at: string;
+  note: string;
+  document_number: string;
+};
+
 export type PurchaseOrder = {
   id: string;
   number: string;
@@ -348,10 +363,12 @@ export type PurchaseOrder = {
   required_by: string | null;
   subtotal: number;
   currency: string;
+  payment_terms_days: number;
   submitted_at: string | null;
   confirmed_at: string | null;
   created_at: string;
   lines: OrderLine[];
+  events: OrderEvent[];
 };
 
 export type ShipmentLine = {

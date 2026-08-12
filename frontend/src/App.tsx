@@ -96,7 +96,11 @@ export default function App() {
         ) : active === "marketplace" ? (
           <MarketplaceScreen locationId={mainLocation ?? null} />
         ) : active === "orders" ? (
-          <OrdersScreen canSupply={canSupply} locationId={mainLocation ?? null} />
+          <OrdersScreen
+            canSupply={canSupply}
+            locationId={mainLocation ?? null}
+            organizationId={me.data?.organization?.id}
+          />
         ) : active === "receiving" ? (
           <ReceivingScreen locationId={mainLocation ?? null} />
         ) : active === "import" ? (

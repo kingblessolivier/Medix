@@ -2,184 +2,267 @@
 
 Everything specified for the depot-to-retail distribution system, staged.
 
-Each stage states what gets built, which files move, how it is proved,
-and what it unblocks. Stages are ordered so that nothing is built on top
-of something still undecided.
+Each stage states what gets built, the exact model and service surface,
+how it is proved, and what it unblocks. Stages are ordered so nothing is
+built on top of something still undecided.
 
 Cross-references: `docs/28-distribution-spec.md` (schema reconciliation
-and the finance model), `docs/29-alerts.md` (warnings).
+and the finance model), `docs/29-alerts.md` (warnings),
+`docs/18-document-design.md` (document anatomy and rendering),
+`docs/21-data-visualization.md` (charts).
 
 ---
 
 ## Where this actually stands
 
-Honest state, not a summary of intentions.
-
-**Built and tested — 322 tests passing**
+Honest state, not a summary of intentions. **343 tests passing.**
 
 | Area | What works today |
 |---|---|
 | Ledger | Append-only `StockMovement`; balances derived and rebuildable; FEFO allocation |
 | Units | Carton → pack → blister → unit per dosage form; integer conversion; mixed-unit entry |
 | Pricing | Per-level derivation with explicit rounding; batch-level cost |
-| Catalogue | 37 products, 13 therapeutic categories, 5 product types, manufacturers, clinical identity, storage rules |
+| Catalogue | Full pharmacy range — medicines, sexual health, baby care, first aid, oral care, cosmetics, devices; manufacturers with country and GMP; dosage form, strength, route on `Product`; storage range, light and moisture sensitivity; weight, dimensions, reorder point; product images |
 | Distribution | Depot allocation (`offered_base` / `committed_base`), two-stage approval, dispatch with FEFO picking, delivery note |
-| Receiving | GRN against PO, discrepancies, catalogue mirroring by registration then GTIN |
+| Ordering | Cart in the buyer's chosen unit, mixed-unit entry, MOQ and allocation enforced at add time |
+| Inbound | Import receipt with FX, batch capture, landed-cost apportionment into `Batch.unit_cost_base` |
+| Commerce | Invoices (proforma and tax), payment recording, credit limit hard block, receivables ageing |
 | Retail | POS with prescription gating, controlled register, shifts, X/Z |
 | Design | Tokens with a colour validator, DataTable with selection and saved views, centred modals |
 
-**Specified, not built** — everything in stages 1–9 below.
+**Landed since this plan was first written:** stages 1, 2, 3 and 4.
 
-**Blocked on a decision from you** — drug interaction checking
-(`docs/29-alerts.md` §3.2) and the three Phase 0 verifications (VSDC
-on-premise, data residency, CBHI scope).
+**Not built:** stages 5–12 below.
+
+**One gap worth naming now.** `core.AuditEvent` exists, is append-only,
+and **nothing writes to it.** Every service transition today is
+unrecorded. Stage 5 fixes that first, because alert acknowledgement
+(stage 7), document attestation (stage 5) and any regulator extract all
+depend on it.
 
 ---
 
 ## Constraints the plan obeys
 
-These are already-settled rules; every stage inherits them.
+Already-settled rules; every stage inherits them.
 
 1. **Stock is never mutated.** Only `post_movement()` writes. Balances are a projection.
 2. **FEFO, never FIFO.** For medicines, arrival order is the wrong order.
 3. **Money is integer minor units.** No `DECIMAL`, no float, currency always explicit.
-4. **Regulatory and clinical thresholds are effective-dated configuration.** A decision from eight months ago stays explainable under the rules that applied then.
+4. **Regulatory, clinical and threshold values are effective-dated configuration.** A decision from eight months ago stays explainable under the rules that applied then. This now explicitly includes alert thresholds.
 5. **Aggregates are computed, never stored as periods.** No `financial_ledger` table with pre-summed columns.
 6. **No clinical advice.** Data matches yes; authored clinical judgement no.
-7. **The system never says "net profit".** Gross profit and margin are ours; past that it is an estimated operating result.
+7. **The system never prints "net profit".** Gross profit and margin are ours; past that it is an estimated operating result.
 8. **Tests are mandatory** for anything touching ledger, FEFO, UoM, money or tax.
+9. **Documents are immutable once issued.** A correction is a new version with a visible supersession reference, never an overwrite.
 
 ---
 
-## Stage 1 — Product range and images
+## Stage 5 — Audit spine, order tracking, documents
 
-**Goal.** A depot catalogue a Rwandan pharmacy recognises, and a product
-page a buyer can trust before ordering.
+The largest stage, and it splits into five pieces that ship in order.
+Everything after this depends on at least one of them.
 
-**Build**
+### 5A — The audit spine
 
-- Extend `catalog/reference.py` beyond medicines: sexual health (condoms, lubricants, pregnancy tests, emergency contraception), baby care (formula, nappies, wipes, bottles), first aid, oral care, wound care, mother-and-child.
-- `ProductImage` — file, alt text, ordering, primary flag. Storage local in dev, object storage later.
-- Marketplace card and product modal show the image; a placeholder when absent is explicit, not a blank.
-- Full product detail: brand, generic, strength, form, route, manufacturer with country and GMP, registration number and expiry, storage rules, pack breakdown.
+**Build.** `core/audit.py`:
 
-**Why an image matters here.** A buyer ordering from a screen cannot pick
-the box up. The image is how they confirm the product is what they meant
-and that the presentation matches what they stock. It is verification,
-not decoration — which is why alt text is required and the placeholder is
-never silently empty.
+```python
+def record(*, action: str, subject, actor: User | None,
+           before: dict | None = None, after: dict | None = None,
+           organization: Organization | None = None) -> AuditEvent
+```
 
-**Files.** `catalog/models.py`, `catalog/reference.py`, `catalog/serializers.py`, `MarketplaceScreen.tsx`
+Called from every state-transition service in `commerce`, `inventory`,
+`sales` and `finance`. `subject` is any model instance; `subject_type`
+and `subject_id` derive from it.
 
-**Proof.** Seeded catalogue covers every product type; a product with no image renders the explicit placeholder; image upload rejects non-images and oversize files.
+**Why first.** The table is already append-only with the update and
+delete grants revoked in production. It has been sitting empty. An
+acknowledgement that is not recorded is not an acknowledgement, and a
+document with an attestation block that nothing logged is decorative.
+
+**Proof.** Every service in `commerce/services.py` that changes a status
+writes exactly one audit row; a test enumerates the transition functions
+and asserts the count, so a new transition added without a record fails
+the suite.
+
+### 5B — Order timeline
+
+**Model.** `commerce.OrderEvent(BaseModel)`
+
+| Field | Type | Note |
+|---|---|---|
+| `order` | FK → `PurchaseOrder`, `related_name="events"` | |
+| `from_status` / `to_status` | `CharField(20)` | `PurchaseOrderStatus` values |
+| `actor` | FK → `User`, null | |
+| `actor_organization` | FK → `Organization` | which side moved it |
+| `occurred_at` | `DateTimeField` | UTC, rendered Africa/Kigali |
+| `note` | `TextField(blank=True)` | rejection reason, partial dispatch note |
+| `document_number` | `CharField(30, blank=True)` | the document this stage produced |
+
+**Why a separate table from `AuditEvent`.** The timeline is
+cross-organization — the buyer must see "depot approved, 14:20". Audit is
+tenant-scoped, internal, and also logs patient-data reads, which a
+counterparty must never see. `OrderEvent` is the shared, sanitised view;
+`AuditEvent` is the internal record. Both get written.
+
+**Enforcement.** A single private `_transition(order, to_status, actor, note)`
+helper in `commerce/services.py`; every status assignment routes through
+it. A status can then never change without an event.
+
+**Migration.** Backfill from `submitted_at` and `confirmed_at` on
+existing orders so history is not blank on day one.
+
+**API.** Events embedded in the order detail serializer; the buyer and
+the supplier each see the same list.
+
+**Frontend.** `OrderTimeline.tsx` — vertical rail, Lucide icons at 16px,
+status label 13/400, timestamp and actor 11/400 helper. Lives inside the
+order modal; a timeline is inspection, not a workflow, so it does not get
+a page.
+
+### 5C — The document pipeline
+
+**New app: `documents/`.**
+
+**Model.** `documents.Document(TenantModel)`
+
+| Field | Type | Note |
+|---|---|---|
+| `kind` | `CharField(20)`, choices | `PICKING_TICKET`, `DELIVERY_NOTE`, `TAX_INVOICE`, `PROFORMA`, `GRN`, `CONTROLLED_TRANSFER`, `CREDIT_NOTE`, `WRITE_OFF_CERTIFICATE`, … |
+| `number` | `CharField(30)` | from `core.sequences`, gap-free |
+| `subject_type` / `subject_id` | | the order, shipment, invoice or batch |
+| `context` | `JSONField` | **the frozen render context** |
+| `pdf` | `FileField` | rendered bytes |
+| `sha256` | `CharField(64)` | content hash |
+| `version` | `IntegerField(default=1)` | |
+| `supersedes` | FK → self, null | |
+| `issued_at` / `issued_by` | | |
+
+**Why the context is frozen.** A reissued invoice must show what it
+showed then. Re-rendering from live data would silently restate history —
+a product renamed, a tax rule superseded, an address corrected — and the
+reprint would no longer be the document that was signed.
+
+**Rendering.** `documents/render.py`: Django template → HTML → headless
+Chromium via Playwright → PDF, exactly as `docs/18` §Implementation
+specifies. Deterministic: the same context produces the same bytes.
+Adds `playwright` to `requirements/` and a browser-install step to CI.
+
+**Templates.** `documents/templates/docs/base_document.html` owning the
+five regions from `docs/18` §Anatomy — masthead, parties, body,
+attestation, footer — plus `print.css` built from the same tokens as the
+application. **No document-local colour values.**
+
+Templates shipped in this stage:
+
+| Document | Prefix | Notes |
+|---|---|---|
+| Picking ticket | `PT-` | internal; FEFO order, grouped by location |
+| Delivery note | `DN-` | exists; gains carrier and signature block |
+| Commercial tax invoice | `INV-` | per-line tax from the effective-dated `TaxRule` |
+| Proforma invoice | `PRO-` | advance payment; new customers, controlled lines |
+| Goods receipt note | `GRN-` | four columns — ordered, received, accepted, rejected |
+| Controlled substance transfer | `CST-` | signed both ends |
+
+### 5D — Dispatch logistics
+
+**`Shipment` gains:** `carrier`, `vehicle_registration`, `driver_name`,
+`driver_licence`, `received_by_name`, `received_by_registration`,
+`received_at`, `signature` (image field).
+
+The picking ticket is FEFO-ordered by location then expiry, so the picker
+walks the warehouse once and cannot pick the wrong batch by reaching for
+the nearest one.
+
+### 5E — Controlled substance gate
+
+**Model.** `commerce.ControlledTransfer(TenantModel)` — shipment,
+depot pharmacist (FK → `PharmacistRegistration`), receiving pharmacist
+name and council registration number, signed timestamps both ends,
+document FK.
+
+`dispatch_order` **refuses** when any line's product is `CONTROLLED` and
+no signed transfer exists. Not a warning — a hard stop, because the chain
+of custody is the legal artifact.
+
+**Files.** `core/audit.py`, `commerce/models.py`, `commerce/services.py`,
+new `documents/` app, `OrdersScreen.tsx`, new `OrderTimeline.tsx`
+
+**Proof.** Every transition writes one `OrderEvent` and one `AuditEvent`;
+the same render context twice produces an identical `sha256`; document
+numbers are gap-free under concurrent issue; an order with a controlled
+line cannot dispatch without a signed `CST-`; a reissued invoice carries
+a supersession reference and the original remains readable.
+
+**Unblocks.** Stage 6 (the payload is emitted alongside the delivery
+note), stage 7 (acknowledgement needs the audit spine), stage 8 (credit
+notes and write-off certificates are documents).
 
 ---
 
-## Stage 2 — Cart with unit selection
-
-**Goal.** Ordering in the unit the buyer actually wants, down to the
-smallest sellable one.
-
-**Build**
-
-- Cart holds lines against a listing **and a chosen UoM**, not a bare number.
-- Unit selector offers only levels the depot will sell at that level (`is_sellable` on the wholesale row) — a depot that will not break a pack does not offer tablets.
-- Live line total from `core.pricing.derive`, showing the per-unit price and the rounding when it is not exact.
-- Quantity entry accepts a mixed count — "10 cartons, 8 packs" — via `core.quantity.compose`.
-- MOQ and the depot's remaining allocation both enforced at add time, with the depot's own wording.
-
-**Files.** `commerce/models.py` (cart or reuse the draft order), `commerce/services.py`, `MarketplaceScreen.tsx`, new `CartPanel.tsx`
-
-**Proof.** Adding below MOQ refused; adding beyond the allocation refused; mixed entry produces the right base quantity; derived unit price never below the pack-implied cost.
-
----
-
-## Stage 3 — Depot inbound recording
-
-**Goal.** The depot records what it imported, with everything a medicine
-must carry, in the units it arrived in.
-
-**Build**
-
-- Import receipt: supplier or manufacturer, invoice reference, currency and FX rate with rate date.
-- Per line: product, mixed-unit quantity, batch number, manufacture date, expiry date, unit cost.
-- Landed cost apportionment — freight, customs duty, clearing — spread across lines by value using `Money.allocate` so the split is exact to the franc, landing in `Batch.unit_cost_base`.
-- Batch created on posting; stock enters through `post_movement`.
-- Cold-chain lines require a transport temperature confirmation.
-
-**Why landed cost here.** A depot's "total invested" is not the invoice.
-Freight and duty are real capital and must sit inside batch cost, or
-every downstream margin figure is overstated.
-
-**Files.** `commerce/models.py`, `commerce/services.py`, new `ImportReceiptScreen.tsx`
-
-**Proof.** Apportioned costs sum exactly to the total; a short landed
-cost cannot vanish into rounding; posting is idempotent.
-
----
-
-## Stage 4 — Payment terms and credit
-
-**Goal.** Credit and immediate payment both work, and the depot's cash
-position is protected.
-
-**Build**
-
-- Payment terms on the order, defaulting from `TradingRelationship.payment_terms_days`: immediate, Net-15, Net-30, Net-60.
-- Proforma invoice when advance payment is required — new pharmacies and controlled drugs.
-- Commercial tax invoice on dispatch, with per-line tax from the effective-dated `TaxRule`.
-- Payment recording against the invoice; partial payments allowed.
-- Credit checks: **hard block** at the limit, **warning** at 80% (`docs/29-alerts.md` §6).
-- Receivables ageing: 0–30, 31–60, 61–90, 90+.
-
-**Files.** `commerce/models.py`, new `commerce/invoicing.py`, `commerce/services.py`
-
-**Proof.** An order taking a pharmacy past its limit is refused at
-approval, naming the outstanding balance; ageing buckets reconcile to the
-sum of unpaid invoices.
-
----
-
-## Stage 5 — Order tracking and documents
-
-**Goal.** Both sides see where an order is, and every stage leaves a
-document.
-
-**Build**
-
-- Timeline on the order: raised → approved internally → sent → depot approved → picking → dispatched → delivered → received, each with actor and timestamp.
-- **Picking ticket** — internal depot document, FEFO-ordered by shelf location.
-- **Delivery note** — built; add carrier, vehicle, driver and a signature block.
-- **Controlled substance transfer form** — required when any line is scheduled, signed both ends.
-- Document rendering to PDF, following `docs/18-document-design.md`.
-
-**Files.** new `commerce/documents.py`, `OrdersScreen.tsx`, new `OrderTimeline.tsx`
-
-**Proof.** Every state transition appears on the timeline with an actor;
-an order containing a controlled line cannot dispatch without the form.
-
----
-
-## Stage 6 — Transfer payload
+## Stage 6 — Transfer payload (ASN)
 
 **Goal.** The retail pharmacy re-keys nothing.
 
-**Build**
+**Build.** `commerce/payloads.py`:
 
-- Payload emitted on dispatch: products with registration number and GTIN, batch, expiry, quantities in base units, costs, tax treatment, legal status, cold-chain flag.
-- Consumed on the buyer's side to pre-fill the goods receipt — the receiver confirms and corrects rather than types.
-- Product resolution reuses `mirror_product`: registration number, then GTIN, **never name**.
+```python
+def build_transfer_payload(*, shipment: Shipment) -> dict
+def apply_transfer_payload(*, payload: dict, organization: Organization,
+                           performed_by: User) -> GoodsReceipt
+```
 
-**Two deviations from the supplied payload**, both already argued in
-`docs/28` §10: base units only rather than separate pack and loose
-counters, which cannot drift; and unit cost carrying its rounding rather
-than four decimal places.
+**Envelope.** `{"schema": "medix.transfer/1", "transfer_id": "<DN number>",
+"source_organization", "destination_organization", "dispatched_at", "lines": [...]}`
 
-**Files.** `commerce/payloads.py`, `commerce/services.py`, `ReceivingScreen.tsx`
+**Per line.** Registration number · GTIN · name · generic name · dosage
+form · strength · route · legal status · controlled schedule · cold chain
+· storage range · **packaging chain** as an ordered list of
+`{code, name, factor_to_base}` · batch number · manufacture date · expiry
+date · `quantity_base` · `unit_cost_base` with currency · SRP (stage 10)
+· tax treatment · manufacturer `{name, country, gmp_certified}`.
 
-**Proof.** A dispatched order produces a receipt whose lines match the
-delivery note exactly; a product the buyer has never held is created with
-the right packaging chain; the same payload applied twice is idempotent.
+**Three deviations from the supplied payload**, all argued in `docs/28`:
+
+- **Base units only.** `total_packs_on_hand` plus `loose_units_on_hand`
+  as two counters will drift and then need reconciling. One number,
+  split for display by `core.quantity.split_to_units`.
+- **No four-decimal unit cost.** `core.pricing.derive` returns the
+  rounding alongside the price so a screen can show it rather than
+  absorb it.
+- **Tax treatment, not a rate.** A rate frozen in a payload is wrong the
+  moment the rule changes; the treatment resolves against the receiver's
+  effective-dated `TaxRule`.
+
+**Resolution.** Registration number, then GTIN, **never name** — reusing
+`catalog.services.mirror_product`. A line with neither identifier is
+rejected rather than name-matched, because a name match creates a
+duplicate product with a real batch under it.
+
+**Idempotency.** The payload hash is recorded on the receipt; applying
+the same payload twice returns the existing receipt, following the
+`_dispatch_key` pattern already in `commerce/services.py`.
+
+**Transport.** Both organizations on the same instance — direct service
+call at dispatch, creating a `DRAFT` `GoodsReceipt` pre-filled for the
+buyer. Off-instance — signed JSON download and
+`POST /api/commerce/receipts/import/`.
+
+**Frontend.** `ReceivingScreen` shows "Pre-filled from DN-2026-00412";
+the receiver confirms and corrects rather than types. Discrepancies stay
+the point of the GRN — a pre-filled receipt that cannot be corrected
+would just hide short deliveries.
+
+**Files.** `commerce/payloads.py`, `commerce/services.py`,
+`catalog/services.py`, `ReceivingScreen.tsx`
+
+**Proof.** Round trip: a dispatched order produces a receipt whose lines
+match the delivery note exactly. A product the buyer has never held is
+created with the packaging chain factor-for-factor. The same payload
+applied twice is idempotent. A payload with no registration number and no
+GTIN is refused.
 
 ---
 
@@ -187,45 +270,157 @@ the right packaging chain; the same payload applied twice is idempotent.
 
 **Goal.** The warnings in `docs/29-alerts.md`, without alert fatigue.
 
-**Build**
+### The framework
 
-- `Alert` value object, three severities, acknowledgement written to `AuditEvent`.
-- Operational: short-dated batch at 90 days, stock below reorder point, allocation exhausted.
-- Financial: credit limit, receivable ageing, sale below batch cost.
-- Compliance: registration expiry blocking publish and dispatch, controlled substance quota.
-- The fatigue rules enforced: three per screen, then a summary.
+**Value object.** `core/alerts.py` — frozen dataclass `Alert(code,
+severity, title, detail, subject_type, subject_id, requires_ack)`.
+Three severities: `CRITICAL`, `WARNING`, `INFO`.
 
-**Not in this stage.** Clinical alerts — §3.1 needs licensed reference
-data; interaction checking is blocked on the §3.2 decision.
+**Severity is behaviour, enforced in the service layer, not the UI:**
 
-**Files.** new `core/alerts.py`, per-app check modules, `Banner` usage
+| Severity | Service behaviour | UI |
+|---|---|---|
+| `CRITICAL` | raises `DomainError`; proceeding needs an explicit override with a recorded reason | red banner, blocks the control |
+| `WARNING` | refuses unless the caller passes `acknowledged=[codes]` | amber banner above the control |
+| `INFO` | no effect on the call | passive; a pill in a row |
 
-**Proof.** Each threshold has a test at the boundary; an acknowledgement
-writes an audit row naming user, alert and record.
+**Why acknowledgement is a service argument.** If it were a UI
+convention, the API would remain the real boundary and any client could
+skip it. The service refusing until the code is passed makes the
+acknowledgement a fact rather than a click.
+
+**Thresholds are effective-dated configuration.** `core.AlertRule(TenantModel)`
+— code, `threshold` JSON, severity, `effective_from`, `effective_to`.
+Ninety days and eighty percent are regulatory-shaped policy, and
+`CLAUDE.md` rule 4 covers them: an alert that fired in March must stay
+explainable under March's threshold.
+
+**Acknowledgement.** `AlertAcknowledgement(TenantModel)` — code, subject,
+actor, reason, timestamp — and a matching `AuditEvent` through 5A.
+
+### The checks
+
+**Operational** — `SHORT_DATED_BATCH` (90 days, WARNING) ·
+`BELOW_REORDER_POINT` (the field exists; nothing reads it) ·
+`ALLOCATION_EXHAUSTED` · `STORAGE_CLASS_MISMATCH` (product range against
+location temperature class, CRITICAL on putaway).
+
+**Compliance** — `REGISTRATION_EXPIRED` (CRITICAL; blocks publish and
+dispatch) · `REGISTRATION_EXPIRING` (60 days, WARNING) ·
+`BUYER_LICENCE_EXPIRED` (blocks depot confirmation) ·
+`CONTROLLED_QUOTA_NEAR` / `_EXCEEDED`.
+
+**Financial** — `CREDIT_LIMIT_EXCEEDED` (built in stage 4; moves under
+the framework) · `CREDIT_LIMIT_NEAR` at 80% · `RECEIVABLE_OVERDUE` per
+ageing bucket · `SALE_BELOW_COST` when a price change would put a line
+under batch cost.
+
+**Clinical** — only `docs/29` §3.1, and only once reference data is
+sourced: allergy match, duplicate therapy by category, demographic
+restriction. **Interaction checking is blocked on the §3.2 decision** and
+ships as nothing rather than as something hand-built.
+
+### Delivery
+
+Inline and attached to the thing it is about. **No toast for anything
+requiring action** — it disappears, cannot be re-read, and does not
+survive a page change. Three banners per screen maximum, then a summary
+row. Nothing actionable announced by colour alone.
+
+Out-of-band — a temperature excursion at 02:00, a receivable crossing 60
+days — goes to a `Notification` queue with a delivery adapter stubbed for
+email and SMS. That is the only case for leaving the interface.
+
+**Files.** new `core/alerts.py`, `<app>/checks.py` per app, new
+`Banner.tsx` and `AlertStack.tsx`, `useAlerts` hook
+
+**Proof.** A boundary test per threshold — 89, 90 and 91 days; 79, 80 and
+81 percent. An acknowledgement writes an audit row naming user, alert and
+record. A `CRITICAL` cannot be acknowledged past, only overridden with a
+reason, and the override is itself audited.
 
 ---
 
 ## Stage 8 — Finance
 
-**Goal.** Both tiers answer "what did I put in, what did I get back"
-for any date range.
+**Goal.** Both tiers answer "what did I put in, what did I get back" for
+any date range.
 
-**Build**
+**New app: `finance/`.**
 
-- Expense recording — rent, salaries, transport, utilities, licence fees — categorised.
-- Period report service computing, for an arbitrary range: capital invested, revenue, COGS from batch cost, gross profit, gross margin, expiry write-offs, estimated operating result.
-- Depot and retail variants of the same service, differing in revenue source.
-- Receivables and payables ageing.
+### Models
 
-**Computed, never stored as periods** (`docs/28` §12.1) — so an arbitrary
-range is answerable and a backdated credit note corrects history rather
-than leaving a stale total.
+**`ExpenseCategory(TenantModel)`** — name, code, `is_operating`.
+Seeded: rent, salaries, transport, utilities, licence fees, cold-chain
+power, bank charges.
 
-**Files.** new `finance/` app, `finance/reports.py`
+**`Expense(TenantModel)`** — category, `incurred_on`, `amount_minor`,
+currency, description, branch, payee, document FK.
 
-**Proof.** Gross profit reconciles to the sum of line-level margins;
-COGS reconciles to batch costs of dispatched or dispensed goods; a
-backdated adjustment changes the report for the period it belongs to.
+**`CreditNote(TenantModel)` / `DebitNote`** — one model with a `kind`,
+raised against an `Invoice`, with lines, reason and amount. Adjusts
+receivables and revenue **in the period the note belongs to**, not the
+period it was entered.
+
+**`WriteOff(TenantModel)`** — batch, `quantity_base`, reason
+(`EXPIRY` / `DAMAGE` / `RECALL`), value in minor units, witness name and
+role. Posts a `StockMovement` of kind `EXPIRY_WRITE_OFF` and issues an
+**Inventory Write-Off Certificate** through the stage 5 pipeline — a
+regulated artifact with a genuine signature block, per `docs/18`.
+
+### Reports
+
+`finance/reports.py`:
+
+```python
+def period_report(*, organization: Organization, start: date, end: date,
+                  tier: Literal["DEPOT", "RETAIL"]) -> PeriodReport
+```
+
+Returning, for an arbitrary range:
+
+| Figure | Source |
+|---|---|
+| Capital invested | `GoodsReceiptLine` × `Batch.unit_cost_base`, landed cost included |
+| Revenue | dispatched order value net of credit notes (depot) · `SaleLine.line_total` split cash and insurance (retail) |
+| COGS | `SaleLine` → `Batch.unit_cost_base` — **exact, not averaged** |
+| Gross profit | revenue − COGS |
+| Gross margin | basis points, integer |
+| Expenses | by category |
+| Estimated operating result | gross profit − recorded expenses, with a `basis` string naming what it excludes |
+| Expiry write-offs | `StockMovement` kind `EXPIRY_WRITE_OFF` × batch cost |
+| Stock at risk | batches expiring within 90 days × cost |
+| ROI | gross profit ÷ capital invested, basis points |
+
+Plus `receivables_ageing` (extended from `commerce/invoicing.py` with a
+per-customer breakdown) and `payables_ageing`.
+
+**COGS is exact here.** Cost lives on the batch, FEFO records which batch
+left, and `SaleLine` holds the batch — so the cost of a sale is the cost
+of the actual goods, not a moving average over one `wholesale_cost`
+column.
+
+**Computed, never stored as periods.** A stored total is only true until
+someone backdates a credit note, and then it is quietly wrong with
+nothing to say so. It also fixes the periods in advance — "what did I
+earn between the 3rd and the 17th" becomes unanswerable. A `ReportCache`
+keyed so it can be invalidated is allowed later; the source it is not.
+
+**"Net profit" appears nowhere** — not in a column, a serializer, a
+variable name or a label. A pharmacist who reads "net profit: 65,000" and
+files a tax return on it has been misled by us.
+
+**API.** `GET /api/finance/period/?from=&to=&tier=` ·
+`/api/finance/receivables/` · `/api/finance/expenses/`
+
+**Files.** new `finance/` app — `models.py`, `services.py`, `reports.py`,
+`serializers.py`, `views.py`, `tests/`
+
+**Proof.** Gross profit reconciles to the sum of line-level margins. COGS
+reconciles to the batch costs of goods that actually left. A backdated
+credit note changes the period it belongs to and leaves the current one
+alone. Ageing buckets sum to total outstanding. ROI with zero investment
+returns null, not a division error.
 
 ---
 
@@ -233,20 +428,118 @@ backdated adjustment changes the report for the period it belongs to.
 
 **Goal.** The performance view, correct by construction.
 
-**Build**
+**Chart primitives, hand-built as inline SVG** — `LineChart`,
+`StackedBar`, `GroupedBar`, `CategoryBar`. No charting library initially:
+`docs/21` constrains palette, mark geometry, label placement and
+interaction tightly enough that a library would be fought rather than
+used. Revisit only if interaction demands it.
 
-- Four tiles: total invested, revenue, gross profit, ROI. **No "net profit" tile** — `docs/28` §12.3.
-- Investment against revenue over time, **single axis** — both are RWF, and a second axis would invent a scale difference.
-- Inventory health stacked bar: stable, slow-moving, expiring within 90 days.
-- Revenue by therapeutic class — top three plus "Other", because the validated palette has four categorical slots in light and three in dark.
-- Sales against collections, grouped, so credit terms drying up cash is visible.
-- Every chart has a table view.
+**Four tiles.** Total invested · Revenue · Gross profit · ROI.
+**No net-profit tile** — `docs/28` §12.3.
 
-**Files.** new `modules/analytics/`, chart primitives
+**Four charts.**
 
-**Proof.** `node scripts/validate-palette.mjs` passes; every chart has a
-table equivalent; no chart uses green, amber or red for a non-status
-series.
+| Chart | Form | Constraint |
+|---|---|---|
+| Investment against revenue | line, **single axis** | both are RWF; a second axis invents a scale difference and can be made to show any relationship the author wants |
+| Inventory health | stacked bar | stable · slow-moving · expiring within 90 days — the one place the status ramp is correct rather than reserved, because these *are* statuses |
+| Revenue by therapeutic class | bar, top 3 + "Other" | 13 categories against four categorical slots in light and three in dark; length carries the comparison, colour carries nothing |
+| Sales against collections | grouped bar | credit terms drying up cash has to be visible |
+
+**Every chart carries a table view.** That is the accessibility fallback
+and the answer to any contrast complaint.
+
+Depot and retail dashboards are two compositions of the same primitives,
+differing in revenue source. Date range control, default last six months,
+UTC stored and Africa/Kigali rendered.
+
+**Files.** new `frontend/src/modules/analytics/`, chart primitives under
+`components/charts/`
+
+**Proof.** `node scripts/validate-palette.mjs` passes in CI. Every chart
+has a table equivalent. No chart uses green, amber or red for a
+non-status series.
+
+---
+
+## Stage 10 — Commercial completeness
+
+**Build.**
+
+- **`PriceTier(BaseModel)`** on `VendorListing` — `min_quantity` in
+  `price_uom`, `price`. The cart picks the best qualifying tier; the
+  payload carries the tier that was applied, so the buyer's cost is
+  traceable to a rule rather than to a number someone typed.
+- **`VendorListing.srp`** — suggested retail price, flowing through the
+  transfer payload to seed the buyer's retail price. The buyer may
+  override; it is a starting point, not a controlled price.
+- **INFO alert** when a cart line is one tier short of a discount.
+- **Negative margin warning** on price update, using SRP against batch
+  cost (feeds stage 7's `SALE_BELOW_COST`).
+
+**Proof.** Tier selection at the exact boundary quantity takes the better
+price; a tier priced above the tier below it is refused at save.
+
+---
+
+## Stage 11 — Controlled substances and compliance depth
+
+- Controlled quota as effective-dated configuration per organization, per
+  schedule, per period; warn approaching, block at the limit, both sides
+  of the transaction.
+- Regulator extract: controlled register, movement history and
+  transfer forms for a date range, as a signed document bundle.
+
+---
+
+## Stage 12 — Import documents (Phase 4)
+
+Anchored on the import receipt and `Shipment`, which already sit between
+purchase order and goods receipt.
+
+**Model.** `commerce.ImportDocument(TenantModel)` — kind, number, issuing
+party, file, `issued_on`, `expires_on`, `verified_by`, `verified_at`,
+linked to the receipt and, where the document is batch-specific, to the
+batch.
+
+| Document | Anchor | Gate |
+|---|---|---|
+| Import licence / permit | organization + product | publish refused without a current permit |
+| Proforma invoice | import receipt | — |
+| Commercial invoice | import receipt | the landed-cost basis |
+| Packing list | shipment | reconciled against received quantities |
+| Bill of lading / air waybill | shipment | — |
+| **Certificate of Analysis** | **batch** | **batch cannot become sellable without one for a regulated product** |
+| Certificate of Origin | import receipt | — |
+| Customs declaration (HS codes) | import receipt | duty enters landed cost from here |
+| Cold-chain temperature log | shipment | a breach **quarantines** the batch, it does not warn |
+
+The two gates in bold and the quarantine are the point of this stage. The
+rest is filing.
+
+---
+
+## Sequencing
+
+```
+5A audit spine ─┬─→ 5B timeline ──→ 5C documents ─┬─→ 6 payload
+                │                                  ├─→ 8 finance ──→ 9 dashboards
+                └─→ 7 alerts ──────────────────────┘
+                                                   └─→ 11 compliance
+10 commercial ── independent, any time after 6
+12 imports ───── independent, largest and last
+```
+
+5A is genuinely first: three later stages write audit rows and none of
+them can be proved without it. 6 needs 5C because the payload rides with
+the delivery note. 8 needs 5C for credit notes and write-off
+certificates. 9 needs 8. 7 needs only 5A and can run in parallel with 6.
+
+Recommended order: **5A → 5B → 5C → 5D → 5E → 6 → 7 → 8 → 9 → 10 → 11 → 12**.
+
+Finance is late rather than first, deliberately: a dashboard over
+incomplete transaction history is worse than no dashboard, because it
+gets believed.
 
 ---
 
@@ -254,20 +547,19 @@ series.
 
 These block work rather than slow it.
 
-1. **Drug interaction data.** License a clinical dataset, or ship no interaction alert and say so in the interface. There is no safe middle (`docs/29` §3.2).
-2. **VSDC deployment.** On-premise WAR or a hosted endpoint? Fiscalisation and the local agent both wait on it.
-3. **Data residency** under Law 058/2021 — does patient data have to stay in Rwanda? Decides hosting.
-4. **Product images** — who supplies them? Manufacturer artwork, depot photography, or a shared national catalogue.
-5. **Is the depot the only supplier a retail pharmacy sees**, or may a pharmacy hold relationships with several depots? The model supports several; the removal of price comparison assumed one at a time.
-
----
-
-## Sequencing
-
-Stages 1–3 are independent and could run in any order. Stage 4 needs 3
-for invoice values. Stage 5 needs 4 for the tax invoice. Stage 6 needs 5
-for the delivery note. Stages 7–9 need the transaction history that 3–6
-produce, which is why finance is late rather than first — a dashboard
-over incomplete data is worse than no dashboard.
-
-Recommended order: **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9**.
+1. **Drug interaction data.** License a clinical dataset, or ship no
+   interaction alert and say so plainly in the interface. There is no
+   safe middle (`docs/29` §3.2). *Blocks the clinical half of stage 7.*
+2. **VSDC deployment.** On-premise WAR or a hosted endpoint?
+   *Blocks fiscalisation and the local agent.*
+3. **Data residency** under Law 058/2021 — must patient data stay in
+   Rwanda? *Decides hosting, and therefore where rendered PDFs live.*
+4. **Product images** — manufacturer artwork, depot photography, or a
+   shared national catalogue? *Affects stage 5's storage decision too.*
+5. **One depot per pharmacy, or several?** The model supports several;
+   removing price comparison assumed one at a time. *Affects the
+   marketplace and the transfer payload's routing.*
+6. **Playwright in the deployment target.** Headless Chromium needs
+   ~400MB and specific system libraries. If the target cannot carry it,
+   the fallback is WeasyPrint — which changes what `docs/18` can promise
+   about web-preview parity. *Blocks stage 5C.*

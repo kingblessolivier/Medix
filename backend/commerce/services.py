@@ -16,20 +16,22 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
-from catalog.models import Product, UnitOfMeasure
+from catalog.models import LegalStatus, Product, UnitOfMeasure
 from commerce import invoicing
-from core import sequences
+from core import audit, sequences
 from core.capabilities import Capability, require_capability
 from core.exceptions import DomainError, InsufficientStock
-from core.models import Organization, User
+from core.models import Organization, PharmacistRegistration, User
 from core import pricing
 from core.money import Money
 from core.quantity import Quantity, from_base
 from commerce.models import (
     Availability,
+    ControlledTransfer,
     GoodsReceipt,
     GoodsReceiptLine,
     GoodsReceiptStatus,
+    OrderEvent,
     PurchaseOrder,
     PurchaseOrderLine,
     PurchaseOrderStatus,
@@ -76,6 +78,63 @@ class NotSellable(DomainError):
 class NotApprover(DomainError):
     default_code = "not_approver"
     default_detail = "This order needs a different person to approve it."
+
+
+class ControlledTransferRequired(DomainError):
+    default_code = "controlled_transfer_required"
+    default_detail = "A signed controlled substance transfer form is required."
+
+
+# --------------------------------------------------------------------------
+# Transitions
+# --------------------------------------------------------------------------
+
+
+def _transition(
+    order: PurchaseOrder,
+    *,
+    to_status: str,
+    actor: User | None,
+    note: str = "",
+    document_number: str = "",
+    extra_fields: list[str] | None = None,
+) -> PurchaseOrder:
+    """The only place an order's status changes.
+
+    Routing every assignment through one helper is what makes the
+    timeline trustworthy: a status cannot move without leaving both an
+    `OrderEvent` — which the counterparty sees — and an `AuditEvent`,
+    which only the owning organization does.
+
+    Writing them separately at each call site would work until somebody
+    added a transition and forgot one. `test_every_transition_records`
+    enumerates the services and asserts the pairing, so that omission
+    fails the suite rather than the next audit.
+    """
+    from_status = order.status
+    order.status = to_status
+    order.modified_by = actor
+    fields = ["status", "modified_by", "modified_at", *(extra_fields or [])]
+    order.save(update_fields=list(dict.fromkeys(fields)))
+
+    OrderEvent.objects.create(
+        order=order,
+        from_status=from_status,
+        to_status=to_status,
+        actor=actor,
+        actor_organization_id=actor.organization_id if actor else None,
+        note=note,
+        document_number=document_number,
+    )
+    audit.record(
+        action=f"commerce.order.{to_status.lower()}",
+        subject=order,
+        actor=actor,
+        before={"status": from_status},
+        after={"status": to_status, "number": order.number, "note": note},
+        organization=order.organization,
+    )
+    return order
 
 
 # --------------------------------------------------------------------------
@@ -133,10 +192,23 @@ def publish_listing(
     if offered_base is not None:
         defaults["offered_base"] = offered_base
 
-    listing, _ = VendorListing.objects.update_or_create(
+    listing, created = VendorListing.objects.update_or_create(
         organization=organization,
         product=product,
         defaults=defaults,
+    )
+    audit.record(
+        action="commerce.listing.published" if created else "commerce.listing.repriced",
+        subject=listing,
+        actor=performed_by,
+        after={
+            "product": product.name,
+            "price": listing.price,
+            "currency": listing.currency,
+            "offered_base": listing.offered_base,
+            "availability": listing.availability,
+        },
+        organization=organization,
     )
     return listing
 
@@ -329,10 +401,9 @@ def request_approval(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrd
     if not order.lines.exists():
         raise DomainError("Add a product first.", code="order_empty")
 
-    order.status = PurchaseOrderStatus.PENDING_APPROVAL
-    order.modified_by = performed_by
-    order.save(update_fields=["status", "modified_by", "modified_at"])
-    return order
+    return _transition(
+        order, to_status=PurchaseOrderStatus.PENDING_APPROVAL, actor=performed_by
+    )
 
 
 @transaction.atomic
@@ -348,17 +419,16 @@ def reject_order(*, order: PurchaseOrder, performed_by: User, reason: str) -> Pu
         raise DomainError("Give a reason for the rejection.", code="reason_required")
     _assert_internal_approver(order, performed_by)
 
-    order.status = PurchaseOrderStatus.REJECTED
     order.rejected_by = performed_by
     order.rejected_at = timezone.now()
     order.reason = reason.strip()
-    order.modified_by = performed_by
-    order.save(
-        update_fields=[
-            "status", "rejected_by", "rejected_at", "reason", "modified_by", "modified_at",
-        ]
+    return _transition(
+        order,
+        to_status=PurchaseOrderStatus.REJECTED,
+        actor=performed_by,
+        note=order.reason,
+        extra_fields=["rejected_by", "rejected_at", "reason"],
     )
-    return order
 
 
 @transaction.atomic
@@ -366,10 +436,7 @@ def reopen_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
     """A rejected order goes back to draft so it can be corrected."""
     if order.status != PurchaseOrderStatus.REJECTED:
         raise DomainError("Only a rejected order can be reopened.", code="order_not_rejected")
-    order.status = PurchaseOrderStatus.DRAFT
-    order.modified_by = performed_by
-    order.save(update_fields=["status", "modified_by", "modified_at"])
-    return order
+    return _transition(order, to_status=PurchaseOrderStatus.DRAFT, actor=performed_by)
 
 
 def _assert_internal_approver(order: PurchaseOrder, user: User) -> None:
@@ -411,18 +478,16 @@ def submit_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
         )
 
     order.number = sequences.next_number(order.organization, "PURCHASE_ORDER")
-    order.status = PurchaseOrderStatus.SUBMITTED
     order.submitted_at = timezone.now()
     order.approved_by = performed_by
     order.approved_at = timezone.now()
-    order.modified_by = performed_by
-    order.save(
-        update_fields=[
-            "number", "status", "submitted_at", "approved_by", "approved_at",
-            "modified_by", "modified_at",
-        ]
+    return _transition(
+        order,
+        to_status=PurchaseOrderStatus.SUBMITTED,
+        actor=performed_by,
+        document_number=order.number,
+        extra_fields=["number", "submitted_at", "approved_by", "approved_at"],
     )
-    return order
 
 
 @transaction.atomic
@@ -457,18 +522,15 @@ def confirm_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
         listing.committed_base += line.quantity_base
         listing.save(update_fields=["committed_base"])
 
-    order.status = PurchaseOrderStatus.CONFIRMED
     order.confirmed_at = timezone.now()
     order.approved_by = performed_by
     order.approved_at = timezone.now()
-    order.modified_by = performed_by
-    order.save(
-        update_fields=[
-            "status", "confirmed_at", "approved_by", "approved_at",
-            "modified_by", "modified_at",
-        ]
+    return _transition(
+        order,
+        to_status=PurchaseOrderStatus.CONFIRMED,
+        actor=performed_by,
+        extra_fields=["confirmed_at", "approved_by", "approved_at"],
     )
-    return order
 
 
 @transaction.atomic
@@ -479,10 +541,7 @@ def start_preparation(*, order: PurchaseOrder, performed_by: User) -> PurchaseOr
     if order.status != PurchaseOrderStatus.CONFIRMED:
         raise DomainError("Only an approved order can be prepared.", code="order_not_confirmed")
 
-    order.status = PurchaseOrderStatus.PREPARING
-    order.modified_by = performed_by
-    order.save(update_fields=["status", "modified_by", "modified_at"])
-    return order
+    return _transition(order, to_status=PurchaseOrderStatus.PREPARING, actor=performed_by)
 
 
 # --------------------------------------------------------------------------
@@ -507,6 +566,10 @@ def dispatch_order(
     from_location: Location,
     performed_by: User,
     carrier: str = "",
+    vehicle_registration: str = "",
+    driver_name: str = "",
+    driver_licence: str = "",
+    controlled_transfer: PharmacistRegistration | None = None,
 ) -> Shipment:
     """Ship what is outstanding, and take it out of the supplier's ledger.
 
@@ -545,11 +608,25 @@ def dispatch_order(
     if not outstanding:
         raise NothingToDispatch()
 
+    # A scheduled drug does not leave without two named pharmacists on
+    # the form. Checked before anything moves, because a stock movement
+    # posted and then rolled back still had to be reasoned about.
+    controlled = [line for line in outstanding if line.product.legal_status == LegalStatus.CONTROLLED]
+    if controlled and controlled_transfer is None:
+        raise ControlledTransferRequired(
+            f"{controlled[0].product.name} is a controlled drug. "
+            "Raise a transfer form first.",
+            meta={"products": [line.product.name for line in controlled]},
+        )
+
     shipment = Shipment.objects.create(
         organization=order.supplier,
         order=order,
         from_location=from_location,
         carrier=carrier,
+        vehicle_registration=vehicle_registration,
+        driver_name=driver_name,
+        driver_licence=driver_licence,
         created_by=performed_by,
     )
 
@@ -614,21 +691,53 @@ def dispatch_order(
     shipment.dispatched_at = timezone.now()
     shipment.save(update_fields=["number", "status", "dispatched_at", "modified_at"])
 
-    _update_dispatch_progress(order)
+    if controlled:
+        ControlledTransfer.objects.create(
+            organization=order.supplier,
+            shipment=shipment,
+            released_by=controlled_transfer,
+            released_at=timezone.now(),
+            number=sequences.next_number(order.supplier, "CONTROLLED_TRANSFER"),
+            created_by=performed_by,
+        )
+
+    audit.record(
+        action="commerce.shipment.dispatched",
+        subject=shipment,
+        actor=performed_by,
+        after={
+            "number": shipment.number,
+            "order": order.number,
+            "lines": shipment.lines.count(),
+            "carrier": carrier,
+        },
+        organization=order.supplier,
+    )
+
+    _update_dispatch_progress(
+        order, performed_by=performed_by, document_number=shipment.number
+    )
     return shipment
 
 
-def _update_dispatch_progress(order: PurchaseOrder) -> None:
+def _update_dispatch_progress(
+    order: PurchaseOrder, *, performed_by: User | None = None, document_number: str = ""
+) -> None:
     # Query the lines rather than reading order.lines.all(): the viewset
     # prefetches that relation, so the cached rows still carry the
     # pre-dispatch tallies and a fully shipped order would be left
     # PARTIALLY_DISPATCHED forever.
     lines = list(PurchaseOrderLine.objects.filter(order=order))
-    if all(line.undispatched_base == 0 for line in lines):
-        order.status = PurchaseOrderStatus.DISPATCHED
-    else:
-        order.status = PurchaseOrderStatus.PARTIALLY_DISPATCHED
-    order.save(update_fields=["status", "modified_at"])
+    complete = all(line.undispatched_base == 0 for line in lines)
+    _transition(
+        order,
+        to_status=(
+            PurchaseOrderStatus.DISPATCHED if complete
+            else PurchaseOrderStatus.PARTIALLY_DISPATCHED
+        ),
+        actor=performed_by,
+        document_number=document_number,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -834,21 +943,40 @@ def post_receipt(*, receipt: GoodsReceipt, performed_by: User) -> GoodsReceipt:
     receipt.modified_by = performed_by
     receipt.save(update_fields=["number", "status", "posted_at", "modified_by", "modified_at"])
 
+    audit.record(
+        action="commerce.receipt.posted",
+        subject=receipt,
+        actor=performed_by,
+        after={
+            "number": receipt.number,
+            "lines": len(lines),
+            "landed_charges": receipt.landed_charges,
+            "order": receipt.order.number if receipt.order else "",
+        },
+        organization=receipt.organization,
+    )
+
     if receipt.order is not None:
-        _update_order_progress(receipt.order)
+        _update_order_progress(
+            receipt.order, performed_by=performed_by, document_number=receipt.number
+        )
 
     return receipt
 
 
-def _update_order_progress(order: PurchaseOrder) -> None:
-    lines = list(order.lines.all())
+def _update_order_progress(
+    order: PurchaseOrder, *, performed_by: User | None = None, document_number: str = ""
+) -> None:
+    lines = list(PurchaseOrderLine.objects.filter(order=order))
     if all(line.outstanding_base == 0 for line in lines):
-        order.status = PurchaseOrderStatus.RECEIVED
+        to_status = PurchaseOrderStatus.RECEIVED
     elif any(line.received_base > 0 for line in lines):
-        order.status = PurchaseOrderStatus.PARTIALLY_RECEIVED
+        to_status = PurchaseOrderStatus.PARTIALLY_RECEIVED
     else:
         return
-    order.save(update_fields=["status", "modified_at"])
+    _transition(
+        order, to_status=to_status, actor=performed_by, document_number=document_number
+    )
 
 
 def discrepancies(receipt: GoodsReceipt) -> list[dict]:

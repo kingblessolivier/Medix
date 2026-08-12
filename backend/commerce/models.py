@@ -247,6 +247,50 @@ class PurchaseOrderLine(BaseModel):
         return max(0, self.quantity_base - self.dispatched_base)
 
 
+class OrderEvent(BaseModel):
+    """One movement of an order, visible to both sides.
+
+    Deliberately not `AuditEvent`. Audit is tenant-scoped, internal, and
+    also records reads of patient data — a counterparty must never see
+    it. But the buyer does need to know the depot approved their order at
+    14:20, and the depot needs to know when the buyer received it.
+
+    So this is the shared, sanitised half: status, actor, time, and a
+    note. Both records are written on every transition; neither replaces
+    the other.
+
+    Not a `TenantModel`: the row belongs to the order, and the order is
+    already visible to both organizations. Scoping it to one tenant would
+    hide half the timeline from the other side.
+    """
+
+    order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name="events")
+    from_status = models.CharField(max_length=25, blank=True)
+    to_status = models.CharField(max_length=25)
+
+    actor = models.ForeignKey(
+        "core.User", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    #: Which side moved it. The buyer's screen reads "you" against its own
+    #: organization and the supplier's name against the other.
+    actor_organization = models.ForeignKey(
+        "core.Organization", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+
+    occurred_at = models.DateTimeField(default=timezone.now)
+    note = models.TextField(blank=True)
+    #: The document this stage produced, if any — PO, DN, INV.
+    document_number = models.CharField(max_length=30, blank=True)
+
+    class Meta:
+        db_table = "commerce_order_event"
+        ordering = ["occurred_at"]
+        indexes = [models.Index(fields=["order", "occurred_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.order} → {self.to_status}"
+
+
 # --------------------------------------------------------------------------
 # Receiving
 # --------------------------------------------------------------------------
@@ -436,7 +480,25 @@ class Shipment(TenantModel):
         max_length=20, choices=ShipmentStatus.choices, default=ShipmentStatus.DRAFT
     )
     dispatched_at = models.DateTimeField(null=True, blank=True)
+
+    # -- who carried it ----------------------------------------------------
+    #
+    # A delivery note that cannot say who drove the van is not evidence of
+    # anything. For a controlled or cold-chain load these fields are the
+    # chain of custody, which is why they sit on the shipment rather than
+    # in a free-text note.
     carrier = models.CharField(max_length=120, blank=True)
+    vehicle_registration = models.CharField(max_length=20, blank=True)
+    driver_name = models.CharField(max_length=120, blank=True)
+    driver_licence = models.CharField(max_length=40, blank=True)
+
+    # -- who signed for it -------------------------------------------------
+    received_by_name = models.CharField(max_length=120, blank=True)
+    received_by_registration = models.CharField(
+        max_length=60, blank=True, help_text="Council number of the receiving pharmacist."
+    )
+    received_at = models.DateTimeField(null=True, blank=True)
+    signature = models.ImageField(upload_to="signatures/%Y/%m/", null=True, blank=True)
 
     class Meta:
         db_table = "commerce_shipment"
@@ -486,6 +548,60 @@ class ShipmentLine(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.product.name} {self.batch_number}"
+
+
+class ControlledTransfer(TenantModel):
+    """Chain of custody for scheduled drugs, signed at both ends.
+
+    A narcotic leaving a depot is not an ordinary delivery. Two named,
+    registered pharmacists take responsibility for it — one releasing,
+    one accepting — and the gap between those two signatures is where
+    diversion happens.
+
+    So this is a hard gate on dispatch rather than a document produced
+    afterwards. `commerce.services.dispatch_order` refuses to move a
+    controlled line without a released form, and the receiving side
+    counter-signs on arrival.
+    """
+
+    number = models.CharField(max_length=30, blank=True)
+    shipment = models.OneToOneField(
+        Shipment, on_delete=models.PROTECT, related_name="controlled_transfer"
+    )
+
+    #: The depot's responsible pharmacist. A registration, not a user:
+    #: the council number is what the regulator checks.
+    released_by = models.ForeignKey(
+        "core.PharmacistRegistration", on_delete=models.PROTECT, related_name="+"
+    )
+    released_at = models.DateTimeField(null=True, blank=True)
+
+    #: The receiving pharmacist is at another organization, so they are
+    #: recorded by name and council number rather than by foreign key.
+    received_by_name = models.CharField(max_length=120, blank=True)
+    received_by_registration = models.CharField(max_length=60, blank=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "commerce_controlled_transfer"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "number"],
+                condition=~models.Q(number=""),
+                name="uq_controlled_transfer_number",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.number or f"draft transfer {self.id}"
+
+    @property
+    def is_released(self) -> bool:
+        return self.released_at is not None
+
+    @property
+    def is_complete(self) -> bool:
+        return self.released_at is not None and self.received_at is not None
 
 
 # --------------------------------------------------------------------------
