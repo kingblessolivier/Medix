@@ -126,6 +126,15 @@ class AddLineSerializer(serializers.Serializer):
 class CompleteSaleSerializer(serializers.Serializer):
     pharmacist = serializers.UUIDField(required=False, allow_null=True)
     prescription = serializers.UUIDField(required=False, allow_null=True)
+    #: Clinical warnings the pharmacist has seen and accepted, by code.
+    #: The counter refuses until each one comes back, and the acceptance
+    #: is written to the audit stream against their name.
+    acknowledged = serializers.ListField(
+        child=serializers.CharField(max_length=60), required=False, default=list
+    )
+    clinical_reason = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
 
 
 class TakePaymentSerializer(serializers.Serializer):

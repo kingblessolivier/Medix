@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from core.models import TenantModel
 
@@ -399,3 +400,73 @@ class ProductRegistration(TenantModel):
         if self.status != RegistrationStatus.REGISTERED:
             return False
         return self.registration_expiry is None or self.registration_expiry >= as_of
+
+
+# --------------------------------------------------------------------------
+# Clinical reference data
+# --------------------------------------------------------------------------
+
+
+class ClinicalAttributeKind(models.TextChoices):
+    """Facts about a product that a dispensing check compares against.
+
+    Every one of these is a **recorded, sourced value** — never inferred,
+    never computed. The system asserts an equality or an inequality
+    between two stored numbers; it does not form a clinical judgement.
+    That line is what keeps this the right side of "no clinical advice".
+    """
+
+    MIN_AGE_YEARS = "MIN_AGE_YEARS", "Minimum age, years"
+    MAX_AGE_YEARS = "MAX_AGE_YEARS", "Maximum age, years"
+    MAX_DAILY_DOSE_BASE = "MAX_DAILY_DOSE_BASE", "Maximum daily dose, base units"
+    PREGNANCY_RESTRICTED = "PREGNANCY_RESTRICTED", "Restricted in pregnancy"
+    #: The active ingredient, for allergy matching. Held separately from
+    #: `generic_name` because one product can carry several.
+    ACTIVE_INGREDIENT = "ACTIVE_INGREDIENT", "Active ingredient"
+
+
+class ClinicalAttribute(TenantModel):
+    """One sourced clinical fact about a product, with the dates it applied.
+
+    Effective-dated on the same footing as a tax rule. A dispensing
+    decision from eight months ago must stay explainable under the
+    reference data that applied then — a maximum dose revised downwards
+    last month must not make last year's dispensing look reckless.
+
+    `source` is required. A clinical threshold with no cited origin is an
+    opinion, and this system does not hold opinions about medicines.
+    """
+
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="clinical_attributes"
+    )
+    kind = models.CharField(max_length=24, choices=ClinicalAttributeKind.choices)
+
+    #: Numeric for a dose or an age, text for an ingredient, and the
+    #: boolean kinds use `value_number` 1/0. One column rather than three
+    #: mostly-null ones.
+    value_number = models.BigIntegerField(null=True, blank=True)
+    value_text = models.CharField(max_length=200, blank=True)
+
+    source = models.CharField(
+        max_length=200, help_text="Where this came from — SmPC, Rwanda FDA, monograph."
+    )
+    source_reference = models.CharField(max_length=200, blank=True)
+
+    effective_from = models.DateField(default=timezone.localdate)
+    effective_to = models.DateField(null=True, blank=True)
+
+    class Meta:
+        db_table = "catalog_clinical_attribute"
+        ordering = ["kind", "-effective_from"]
+        indexes = [
+            models.Index(fields=["product", "kind", "effective_from"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(source=""), name="ck_clinical_source_required"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product.name} {self.kind}"

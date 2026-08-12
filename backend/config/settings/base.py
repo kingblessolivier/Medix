@@ -188,11 +188,12 @@ MEDIA_ROOT = BASE_DIR / "media"
 # Documents. See docs/18-document-design.md.
 # --------------------------------------------------------------------------
 
-# HTML is always rendered and stored; PDF depends on the host carrying a
-# headless browser. "playwright" once the deployment target is settled,
-# "none" until then — a document with no PDF is still issued, numbered
-# and immutable, and can be back-filled from its stored context.
-DOCUMENT_PDF_BACKEND = env("DOCUMENT_PDF_BACKEND", default="none")
+# HTML is always rendered and stored; PDF needs a headless browser on the
+# host. Playwright is installed and the default is now "playwright" — a
+# deployment that cannot carry Chromium sets this to "none" and still
+# gets issued, numbered, immutable documents that can be back-filled
+# from their stored context later.
+DOCUMENT_PDF_BACKEND = env("DOCUMENT_PDF_BACKEND", default="playwright")
 
 # Print colour is read from the application's tokens rather than copied,
 # so a rename on the frontend fails the document tests instead of

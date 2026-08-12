@@ -20,13 +20,14 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
-from catalog.models import LegalStatus, Product, TaxTreatment, UnitOfMeasure
-from core import sequences
+from catalog.models import Product, TaxTreatment, UnitOfMeasure
+from core import alerts, sequences
 from core.exceptions import DomainError, PrescriptionRequired, RegistrationInvalid
 from core.models import Organization, PharmacistRegistration, User
 from core.quantity import Quantity
 from inventory import services as inventory
 from inventory.models import Location, MovementKind
+from sales import clinical, interactions
 from sales.models import (
     ControlledDeliveryEntry,
     Prescription,
@@ -272,6 +273,8 @@ def complete_sale(
     pharmacist: User | None = None,
     prescription: Prescription | None = None,
     idempotency_key: str | None = None,
+    acknowledged: list[str] | None = None,
+    clinical_reason: str = "",
 ) -> Sale:
     """Post the sale: gate, move stock, register, number, total.
 
@@ -307,6 +310,27 @@ def complete_sale(
 
     if controlled:
         _gate_controlled(prescription)
+
+    # Clinical checks, where a patient is known. Warnings addressed to
+    # the pharmacist: a hard stop would be worked around rather than
+    # heeded, so what the system insists on is that the conflict was seen
+    # and that the acknowledgement is on the record.
+    #
+    # Interaction checking is not among these — see sales/interactions.py
+    # and the notice the counter prints.
+    patient = prescription.patient if prescription is not None else sale.patient
+    if patient is not None:
+        found = clinical.for_dispensing(
+            patient=patient, products=[line.product for line in lines]
+        )
+        found.extend(interactions.check(products=[line.product for line in lines]).alerts)
+        alerts.enforce(
+            found,
+            organization=sale.organization,
+            performed_by=pharmacist or performed_by,
+            acknowledged=acknowledged or [],
+            reason=clinical_reason,
+        )
 
     # Stock leaves through the ledger. One movement per line, so each
     # batch's traceability stays intact.

@@ -454,6 +454,20 @@ export type Alert = {
   meta: Record<string, unknown>;
 };
 
+/* An interaction check that did not run is not a clean one. `state` is
+   NOT_AVAILABLE when no clinical dataset is licensed, and the counter
+   prints `notice` rather than showing nothing. */
+export type ClinicalReview = AlertSummary & {
+  patient_known: boolean;
+  interactions: {
+    state: "CLEAR" | "FOUND" | "NOT_AVAILABLE";
+    provider: string;
+    dataset_version: string;
+    alerts: Alert[];
+  };
+  interaction_notice: string;
+};
+
 export type AlertSummary = {
   visible: Alert[];
   /** How many the fatigue rule folded away. */
@@ -622,10 +636,18 @@ export const api = {
     id: string,
     line: { product: string; quantity: number; uom_code: string; unit_price: number },
   ) => request<Sale>(`/sales/${id}/lines/`, { method: "POST", body: line }),
-  completeSale: (id: string) =>
+  /* What the pharmacist must see before completing. Interaction state is
+     reported separately from the alerts, because NOT_AVAILABLE and an
+     empty list are different answers. */
+  saleClinical: (id: string) => request<ClinicalReview>(`/sales/${id}/clinical/`),
+
+  completeSale: (
+    id: string,
+    body: { acknowledged?: string[]; clinical_reason?: string } = {},
+  ) =>
     request<Sale>(`/sales/${id}/complete/`, {
       method: "POST",
-      body: {},
+      body,
       // Goods and money both move here, so a retry must not double-apply.
       idempotencyKey: crypto.randomUUID(),
     }),

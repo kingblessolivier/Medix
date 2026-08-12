@@ -422,3 +422,47 @@ class TestControlledTransferDocument:
         assert "Released in Medix" in document.html
         assert "NPC-4412" in document.html
         assert "Morphine 10mg" in document.html
+
+
+class TestPdfRendering:
+    """Playwright is installed and the default backend now uses it.
+
+    A deployment that cannot carry Chromium sets DOCUMENT_PDF_BACKEND to
+    "none" and still gets issued, numbered, immutable documents — so
+    these skip rather than fail where the browser is absent.
+    """
+
+    def test_a_pdf_is_produced(self, shipped):
+        from django.conf import settings
+
+        if settings.DOCUMENT_PDF_BACKEND == "none":
+            pytest.skip("No PDF backend configured on this host.")
+
+        document = documents.latest(
+            subject=shipped["shipment"], kind=DocumentKind.DELIVERY_NOTE
+        )
+        assert document.pdf, "expected a rendered PDF"
+        document.pdf.open("rb")
+        try:
+            assert document.pdf.read(5) == b"%PDF-"
+        finally:
+            document.pdf.close()
+
+    def test_the_pdf_is_named_for_its_version(self, shipped):
+        from django.conf import settings
+
+        if settings.DOCUMENT_PDF_BACKEND == "none":
+            pytest.skip("No PDF backend configured on this host.")
+
+        document = documents.latest(
+            subject=shipped["shipment"], kind=DocumentKind.DELIVERY_NOTE
+        )
+        assert f"{document.number}-v{document.version}" in document.pdf.name
+
+    def test_html_is_stored_whether_or_not_a_pdf_was(self, shipped):
+        """The parity guarantee does not depend on the browser."""
+        document = documents.latest(
+            subject=shipped["shipment"], kind=DocumentKind.DELIVERY_NOTE
+        )
+        assert document.html
+        assert document.sha256

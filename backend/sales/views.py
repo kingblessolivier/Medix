@@ -7,7 +7,6 @@ agent sync endpoint, a management command, or a Celery task.
 
 from __future__ import annotations
 
-from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
@@ -21,6 +20,7 @@ from fiscal.models import FiscalRecord
 from fiscal.services import FiscalIntegrationService, exceptions_for
 from inventory.models import Batch, Location
 from sales import payments as payment_services
+from core.alerts import summarise
 from sales import services, shifts as shift_services
 from sales.models import (
     ControlledDeliveryEntry,
@@ -125,6 +125,37 @@ class SaleViewSet(
         sale.refresh_from_db()
         return Response(SaleSerializer(sale).data)
 
+    @action(detail=True, methods=["get"])
+    def clinical(self, request, pk=None):
+        """What the pharmacist must see before completing.
+
+        Interaction state is reported separately from the alerts, and
+        `NOT_AVAILABLE` is not the same answer as an empty list — one
+        says nobody looked, the other says somebody looked and found
+        nothing. The counter prints the difference.
+        """
+        from sales import clinical as clinical_checks
+        from sales import interactions
+
+        sale = self.get_object()
+        lines = list(sale.lines.select_related("product__category"))
+        products = [line.product for line in lines]
+        patient = sale.prescription.patient if sale.prescription_id else sale.patient
+
+        found = clinical_checks.for_dispensing(patient=patient, products=products)
+        interaction = interactions.check(products=products)
+
+        return Response(
+            {
+                **summarise(found + interaction.alerts),
+                "patient_known": patient is not None,
+                "interactions": interaction.as_dict(),
+                "interaction_notice": (
+                    "" if interaction.was_checked else interactions.NOT_CHECKED_NOTICE
+                ),
+            }
+        )
+
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
         sale = self.get_object()
@@ -147,6 +178,8 @@ class SaleViewSet(
         completed = services.complete_sale(
             sale=sale,
             performed_by=request.user,
+            acknowledged=data.get("acknowledged", []),
+            clinical_reason=data.get("clinical_reason", ""),
             pharmacist=pharmacist,
             prescription=prescription,
             idempotency_key=request.headers.get("Idempotency-Key"),

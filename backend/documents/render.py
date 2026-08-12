@@ -20,8 +20,11 @@ Rather than block every document on that, rendering splits in two:
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import logging
+import queue
+import threading
 
 from django.conf import settings
 from django.template.loader import render_to_string
@@ -66,28 +69,84 @@ def render_pdf(html: str) -> bytes | None:
     raise PdfUnavailable(f"Unknown PDF backend: {backend}")
 
 
-def _playwright_pdf(html: str) -> bytes:  # pragma: no cover - needs a browser
-    """A4 with the margins docs/18 specifies.
+#: A4 with the margins docs/18 specifies. `print_background` is on so the
+#: totals tint survives; the rest of the page is hairlines and type,
+#: which print regardless.
+PAGE = {
+    "format": "A4",
+    "print_background": True,
+    "margin": {"top": "16mm", "bottom": "20mm", "left": "18mm", "right": "18mm"},
+}
 
-    `print_background` is on so the totals tint survives; everything else
-    on the page is hairlines and type, which print regardless.
+
+class _BrowserThread:
+    """One long-lived Chromium, driven from a thread of its own.
+
+    Two problems solved together.
+
+    **Launch cost.** Starting Chromium takes seconds, and a depot
+    dispatching fifty orders would pay it fifty times. The browser is
+    started once and kept.
+
+    **The event loop.** Playwright's sync API runs an asyncio loop in
+    whichever thread starts it, and Django refuses ORM access from a
+    thread with a running loop — `SynchronousOnlyOperation`. Keeping the
+    browser alive in a request thread therefore breaks every query that
+    follows it. Confining it to a worker thread keeps the loop out of the
+    caller's way entirely, and the queue hand-off is what makes that
+    safe.
     """
-    from playwright.sync_api import sync_playwright
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        try:
-            page = browser.new_page()
-            page.set_content(html, wait_until="load")
-            return page.pdf(
-                format="A4",
-                print_background=True,
-                margin={
-                    "top": "16mm",
-                    "bottom": "20mm",
-                    "left": "18mm",
-                    "right": "18mm",
-                },
-            )
-        finally:
-            browser.close()
+    def __init__(self) -> None:
+        self._jobs: queue.Queue = queue.Queue()
+        self._thread = threading.Thread(
+            target=self._serve, name="medix-pdf", daemon=True
+        )
+        self._thread.start()
+
+    def _serve(self) -> None:  # pragma: no cover - needs a browser
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as driver:
+            browser = driver.chromium.launch()
+            try:
+                while True:
+                    job = self._jobs.get()
+                    if job is None:
+                        return
+                    html, reply = job
+                    try:
+                        page = browser.new_page()
+                        try:
+                            page.set_content(html, wait_until="load")
+                            reply.put(("ok", page.pdf(**PAGE)))
+                        finally:
+                            page.close()
+                    except Exception as exc:
+                        reply.put(("error", exc))
+            finally:
+                browser.close()
+
+    def render(self, html: str, *, timeout: int = 60) -> bytes:
+        reply: queue.Queue = queue.Queue(maxsize=1)
+        self._jobs.put((html, reply))
+        status, payload = reply.get(timeout=timeout)
+        if status == "error":
+            raise payload
+        return payload
+
+    def stop(self) -> None:  # pragma: no cover - process teardown
+        self._jobs.put(None)
+
+
+_renderer: _BrowserThread | None = None
+_renderer_lock = threading.Lock()
+
+
+def _playwright_pdf(html: str) -> bytes:  # pragma: no cover - needs a browser
+    global _renderer
+    with _renderer_lock:
+        if _renderer is None:
+            _renderer = _BrowserThread()
+            atexit.register(_renderer.stop)
+    return _renderer.render(html)

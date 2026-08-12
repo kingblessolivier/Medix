@@ -13,11 +13,12 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, ScanBarcode, ShieldAlert, Trash2 } from "lucide-react";
+import { Info, Loader2, ScanBarcode, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiFailure, api, type ProductRow, type Sale, type SaleLine } from "@/lib/api";
 import { Banner, Button, EmptyState, PageHeader, StatusDot } from "@/components/ui";
+import { AlertStack } from "@/components/ui/AlertStack";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
 
@@ -63,9 +64,23 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
     },
   });
 
+  /* What the pharmacist must see before completing. Refetched as lines
+     change, because an allergy or duplicate only appears once the
+     product that conflicts is in the basket. */
+  const review = useQuery({
+    queryKey: ["sale-clinical", saleId, sale.data?.lines.length],
+    queryFn: () => api.saleClinical(saleId!),
+    enabled: Boolean(saleId) && (sale.data?.lines.length ?? 0) > 0,
+  });
+
+  const [accepted, setAccepted] = useState<string[]>([]);
+
   const complete = useMutation({
-    mutationFn: () => api.completeSale(saleId!),
-    onSuccess: (updated) => queryClient.setQueryData(["sale", saleId], updated),
+    mutationFn: () => api.completeSale(saleId!, { acknowledged: accepted }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["sale", saleId], updated);
+      setAccepted([]);
+    },
   });
 
   const pay = useMutation({
@@ -97,6 +112,12 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
   const lines = current?.lines ?? [];
   const isDraft = current?.status === "DRAFT";
   const blocked = current?.blocked_reason ?? null;
+
+  /* Warnings still to be accepted. The server refuses without them too —
+     this only avoids offering a button that will be turned down. */
+  const unacknowledged = (review.data?.visible ?? []).filter(
+    (a) => a.severity === "WARNING" && !accepted.includes(a.code),
+  ).length;
   const failure = [addLine.error, complete.error, pay.error].find(Boolean) as
     | ApiFailure
     | undefined;
@@ -179,6 +200,33 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
             <Banner tone="bad">{failure.error.message}</Banner>
           )}
 
+          {/* Clinical warnings, above the control they block. Each is a
+              recorded data match the pharmacist clears — never a refusal,
+              because a hard stop gets worked around while an
+              acknowledgement gets written to the audit stream. */}
+          {review.data && (
+            <>
+              <AlertStack
+                alerts={(review.data.visible ?? []).filter(
+                  (a) => !accepted.includes(a.code),
+                )}
+                onAcknowledge={(alert) =>
+                  setAccepted((codes) => [...codes, alert.code])
+                }
+              />
+
+              {/* An interaction check that did not run is not a clean
+                  one. Saying nothing here would let a pharmacist infer
+                  the pair was checked and found safe. */}
+              {review.data.interaction_notice && (
+                <p className="flex items-start gap-1.5 text-help text-text-3">
+                  <Info size={13} strokeWidth={1.9} className="mt-0.5 shrink-0" />
+                  {review.data.interaction_notice}
+                </p>
+              )}
+            </>
+          )}
+
           <div className="rounded-lg border border-border bg-surface p-4">
             <Row label="Subtotal" value={money(current?.subtotal ?? 0)} />
             <Row label="Tax" value={money(current?.tax_total ?? 0)} />
@@ -200,7 +248,7 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
             <Button
               variant="primary"
               className="h-11 w-full"
-              disabled={lines.length === 0 || Boolean(blocked)}
+              disabled={lines.length === 0 || Boolean(blocked) || unacknowledged > 0}
               loading={complete.isPending}
               onClick={() => complete.mutate()}
             >

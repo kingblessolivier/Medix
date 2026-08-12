@@ -12,3 +12,10 @@ uuid-utils==0.10.0
 python-dateutil==2.9.0.post0
 # Product images: a buyer verifies the pack before ordering a carton.
 Pillow==12.3.0
+
+# Document rendering: headless Chromium renders exactly what the browser
+# preview shows, which is what docs/18 requires of a PDF. Needs
+# `playwright install chromium` (~400MB) on the host; a deployment that
+# cannot carry it sets DOCUMENT_PDF_BACKEND=none and still issues
+# documents as stored, hashed HTML.
+playwright==1.62.0

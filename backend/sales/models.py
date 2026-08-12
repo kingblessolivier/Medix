@@ -143,12 +143,91 @@ class Patient(TenantModel):
     consent_given_at = models.DateTimeField(null=True, blank=True)
     consent_purpose = models.CharField(max_length=200, blank=True)
 
+    # -- what a demographic check needs ------------------------------------
+    #
+    # Both optional, and absent means **not known** rather than not
+    # applicable: a check that cannot run says so instead of passing. A
+    # paediatric restriction silently skipped because nobody recorded a
+    # birth date is the failure mode this comment exists to name.
+    date_of_birth = models.DateField(null=True, blank=True)
+    sex = models.CharField(
+        max_length=1,
+        blank=True,
+        choices=[("F", "Female"), ("M", "Male")],
+        help_text="Recorded only where a restriction depends on it.",
+    )
+    #: Set by the pharmacist, for the duration they judge relevant. Not
+    #: inferred from anything, and cleared rather than left to expire.
+    is_pregnant = models.BooleanField(null=True, blank=True)
+
     class Meta:
         db_table = "sales_patient"
         ordering = ["full_name"]
 
     def __str__(self) -> str:
         return self.full_name
+
+    def age_years(self, *, as_of=None) -> int | None:
+        """Whole years, or None when the birth date is not recorded."""
+        if self.date_of_birth is None:
+            return None
+        as_of = as_of or timezone.localdate()
+        years = as_of.year - self.date_of_birth.year
+        if (as_of.month, as_of.day) < (
+            self.date_of_birth.month,
+            self.date_of_birth.day,
+        ):
+            years -= 1
+        return years
+
+
+class PatientAllergy(TenantModel):
+    """An allergy a pharmacist recorded, against an active ingredient.
+
+    Recorded against the **ingredient**, not a brand: a patient allergic
+    to amoxicillin is allergic to it under every trade name, and matching
+    on brand would miss the same drug sold as something else.
+
+    Free text rather than a foreign key, because the allergen is often
+    something this catalogue does not stock — a food, a preservative, a
+    drug the pharmacy has never held. Normalised on save so "Penicillin"
+    and "penicillin " match.
+    """
+
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="allergies")
+    allergen = models.CharField(max_length=120)
+    #: Lowercased and stripped. Matching is done on this, never on the
+    #: display form.
+    allergen_normalised = models.CharField(max_length=120, editable=False)
+
+    severity = models.CharField(
+        max_length=12,
+        choices=[
+            ("MILD", "Mild"),
+            ("MODERATE", "Moderate"),
+            ("SEVERE", "Severe"),
+            ("UNKNOWN", "Unknown"),
+        ],
+        default="UNKNOWN",
+    )
+    note = models.TextField(blank=True)
+    recorded_on = models.DateField(default=timezone.localdate)
+
+    class Meta:
+        db_table = "sales_patient_allergy"
+        ordering = ["allergen"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["patient", "allergen_normalised"], name="uq_patient_allergen"
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.allergen_normalised = self.allergen.strip().lower()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.patient.full_name}: {self.allergen}"
 
 
 class Prescriber(TenantModel):

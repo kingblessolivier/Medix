@@ -13,11 +13,12 @@ and the finance model), `docs/29-alerts.md` (warnings),
 
 ---
 
-> **Status: stages 1–12 are built.** What follows is the record of what
-> each stage did and why, kept because the reasoning is the part worth
-> having later. Everything still open is in *Decisions needed from you*
-> at the foot of this document, plus clinical alerts, which are blocked
-> rather than unbuilt.
+> **Status: stages 1–12 are built, and so is everything that was
+> previously blocked on a decision** — PDF rendering, and the clinical
+> checks `docs/29` §3.1 classes as data matches. Drug–drug interaction
+> checking remains without data, deliberately: the machinery is built and
+> a licensed dataset plugs into it, but no table is authored here. See
+> §*Clinical* below.
 
 ---
 
@@ -33,22 +34,39 @@ Honest state, not a summary of intentions.
 | 4 Payment terms and credit | **built** | |
 | 5A Audit spine | **built** | `core/audit.py`; every transition writes |
 | 5B Order timeline | **built** | `OrderEvent`, both sides read it |
-| 5C Document pipeline | **built** | HTML issued and hashed; PDF behind a setting |
+| 5C Document pipeline | **built** | HTML hashed and stored; PDF rendered by Playwright |
 | 5D Dispatch logistics | **built** | carrier, vehicle, driver, signature |
 | 5E Controlled transfer gate | **built** | hard stop before the ledger moves |
 | 6 Transfer payload | **built** | seeds the buyer's draft receipt |
-| 7 Alerts | **built** | clinical half blocked — see below |
+| 7 Alerts | **built** | including the four clinical data-match checks |
 | 8 Finance | **built** | computed per range, never stored as periods |
 | 9 Dashboards | **built** | four tiles, four charts, table view on each |
 | 10 Volume tiers and SRP | **built** | |
 | 11 Controlled quotas and extract | **built** | |
 | 12 Import documents | **built** | CoA releases a batch, a breach holds one |
 
-**Not built, and blocked rather than pending:** clinical alerts.
-`docs/29` §3.1 needs licensed reference data; §3.2 needs the decision at
-the foot of this page.
+**Clinical.** The four §3.1 checks are built — allergy, duplicate
+therapy, demographic restriction, maximum daily dose — each reading
+effective-dated, sourced `catalog.ClinicalAttribute` rows rather than a
+constant. All four are warnings addressed to the pharmacist: a hard stop
+would be worked around, while an acknowledgement is written to the audit
+stream against their name.
 
-The baseline this began from — **343 tests passing.**
+**Interaction checking has machinery and no data, on purpose.**
+`sales/interactions.py` defines the provider a licensed dataset
+implements, and ships `NoDatasetProvider`, which reports
+`NOT_AVAILABLE` rather than an empty result. That distinction is the
+whole point: a pharmacist shown nothing concludes the pair was checked
+and found safe, so the counter prints "Interactions not checked. No
+clinical dataset is licensed on this installation." Licensing one is a
+setting, not a rewrite.
+
+**PDF rendering is on.** Playwright is installed and
+`DOCUMENT_PDF_BACKEND` defaults to `playwright`; a host that cannot carry
+Chromium sets it to `none` and still gets issued, numbered, immutable
+documents as stored, hashed HTML.
+
+**585 tests passing**, from a baseline of 343 when this plan was written.
 
 | Area | What works today |
 |---|---|
@@ -60,18 +78,12 @@ The baseline this began from — **343 tests passing.**
 | Ordering | Cart in the buyer's chosen unit, mixed-unit entry, MOQ and allocation enforced at add time |
 | Inbound | Import receipt with FX, batch capture, landed-cost apportionment into `Batch.unit_cost_base` |
 | Commerce | Invoices (proforma and tax), payment recording, credit limit hard block, receivables ageing |
-| Retail | POS with prescription gating, controlled register, shifts, X/Z |
+| Retail | POS with prescription gating, controlled register, shifts, X/Z, clinical review at the counter |
+| Audit | Every transition recorded; alert acknowledgements attributable |
+| Documents | Nine kinds, frozen at issue, rendered to PDF |
+| Finance | Period reports, expenses, credit notes, write-offs, ageing, dashboards |
+| Compliance | Controlled quotas, chain-of-custody forms, regulator extract, import document gates |
 | Design | Tokens with a colour validator, DataTable with selection and saved views, centred modals |
-
-**Landed since this plan was first written:** stages 1, 2, 3 and 4.
-
-**Not built:** stages 5–12 below.
-
-**One gap worth naming now.** `core.AuditEvent` exists, is append-only,
-and **nothing writes to it.** Every service transition today is
-unrecorded. Stage 5 fixes that first, because alert acknowledgement
-(stage 7), document attestation (stage 5) and any regulator extract all
-depend on it.
 
 ---
 
