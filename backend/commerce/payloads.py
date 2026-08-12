@@ -169,12 +169,28 @@ def build_transfer_payload(*, shipment: Shipment) -> dict:
                 # What the depot paid, so the buyer's cost basis starts
                 # from a real number rather than from the sell price.
                 "unit_cost_base": line.batch.unit_cost_base,
+                # Per the depot's listing unit, which the receiver
+                # resolves against its own chain. A starting point for
+                # the buyer's retail price, never a price they must use.
+                "srp": _srp_for(shipment.organization_id, line.product_id),
                 "currency": order.currency,
                 "cold_chain": line.product.cold_chain,
             }
             for line in lines
         ],
     }
+
+
+def _srp_for(organization_id, product_id) -> dict | None:
+    """The depot's suggested retail price, if it published one."""
+    from commerce.models import VendorListing
+
+    listing = VendorListing.objects.filter(
+        organization_id=organization_id, product_id=product_id, srp__isnull=False
+    ).select_related("price_uom").first()
+    if listing is None:
+        return None
+    return {"amount": listing.srp, "uom_code": listing.price_uom.code}
 
 
 # --------------------------------------------------------------------------

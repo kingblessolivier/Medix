@@ -187,6 +187,42 @@ def receivables_overdue(*, supplier: Organization, as_of: date | None = None) ->
     ]
 
 
+def bulk_discount_available(*, listing, quantity_base: int) -> list[Alert]:
+    """The buyer is close to a volume break they have not reached.
+
+    Info, never a warning. It costs the buyer nothing to ignore, and a
+    soft stop on "you could spend more" would be the system selling
+    rather than informing.
+
+    Only the next tier up is mentioned. Listing all of them turns a
+    useful nudge into a price list.
+    """
+    in_price_uom = quantity_base // listing.price_uom.factor_to_base
+    upcoming = [
+        tier for tier in listing.tiers.all() if tier.min_quantity > in_price_uom
+    ]
+    if not upcoming:
+        return []
+
+    nearest = min(upcoming, key=lambda tier: tier.min_quantity)
+    short_by = nearest.min_quantity - in_price_uom
+    unit = listing.price_uom.code.lower()
+    return [
+        about(
+            listing,
+            code="BULK_DISCOUNT_AVAILABLE",
+            severity=Severity.INFO,
+            title=f"{short_by} more {unit} reaches a lower price",
+            detail=f"{nearest.min_quantity}+ {unit} at {nearest.price:,} each.",
+            meta={
+                "short_by": short_by,
+                "min_quantity": nearest.min_quantity,
+                "price": nearest.price,
+            },
+        )
+    ]
+
+
 def below_cost(*, product, price_base: int, batch) -> list[Alert]:
     """About to sell below what this batch actually cost.
 

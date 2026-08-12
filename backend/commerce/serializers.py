@@ -8,6 +8,7 @@ from commerce.models import (
     GoodsReceipt,
     GoodsReceiptLine,
     OrderEvent,
+    PriceTier,
     PurchaseOrder,
     PurchaseOrderLine,
     PurchaseOrderStatus,
@@ -16,6 +17,12 @@ from commerce.models import (
     TradingRelationship,
     VendorListing,
 )
+
+
+class PriceTierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PriceTier
+        fields = ["min_quantity", "price"]
 
 
 class MarketplaceRowSerializer(serializers.ModelSerializer):
@@ -128,9 +135,12 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
             "cold_chain",
             "available_base",
             "earliest_expiry",
+            "srp",
+            "tiers",
         ]
 
     vendor = serializers.UUIDField(source="organization_id", read_only=True)
+    tiers = PriceTierSerializer(many=True, read_only=True)
 
     def get_earliest_expiry(self, obj):
         return getattr(obj, "earliest_expiry", None)
@@ -143,6 +153,18 @@ class PublishListingSerializer(serializers.Serializer):
     availability = serializers.CharField(max_length=20, required=False)
     moq = serializers.IntegerField(min_value=1, default=1)
     lead_time_days = serializers.IntegerField(min_value=0, default=1)
+    srp = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+
+
+class SetPriceTiersSerializer(serializers.Serializer):
+    """Volume breaks, replacing whatever the listing had.
+
+    Replace rather than append: a depot editing its breaks is restating
+    the whole schedule, and merging would leave a threshold nobody
+    remembers setting still quietly in force.
+    """
+
+    tiers = PriceTierSerializer(many=True)
 
 
 class PurchaseOrderLineSerializer(serializers.ModelSerializer):

@@ -39,6 +39,7 @@ from commerce.serializers import (
     MarketplaceRowSerializer,
     PublishListingSerializer,
     PurchaseOrderSerializer,
+    SetPriceTiersSerializer,
     ShipmentSerializer,
     StartOrderSerializer,
     StartReceiptSerializer,
@@ -181,11 +182,30 @@ class ListingViewSet(
             availability=data.get("availability", Availability.AVAILABLE_NOW),
             moq=data.get("moq", 1),
             lead_time_days=data.get("lead_time_days", 1),
+            srp=data.get("srp"),
             performed_by=request.user,
         )
         return Response(
             MarketplaceRowSerializer(listing).data, status=status.HTTP_201_CREATED
         )
+
+    @action(detail=True, methods=["post"], url_path="tiers")
+    def set_tiers(self, request, pk=None):
+        """Replace this listing's volume breaks."""
+        payload = SetPriceTiersSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        listing = self.get_object()
+        services.set_price_tiers(
+            listing=listing,
+            tiers=[
+                (tier["min_quantity"], tier["price"])
+                for tier in payload.validated_data["tiers"]
+            ],
+            performed_by=request.user,
+        )
+        listing.refresh_from_db()
+        return Response(MarketplaceRowSerializer(listing).data)
 
 
 class PurchaseOrderViewSet(

@@ -312,6 +312,10 @@ export type MarketplaceRow = {
   available_base: number;
   earliest_expiry: string | null;
   units: SellableUnit[];
+  /** Suggested retail price per `uom_code`. A starting point, not a rule. */
+  srp: number | null;
+  /** Volume breaks, thresholds in `uom_code`. Ascending. */
+  tiers: { min_quantity: number; price: number }[];
 };
 
 

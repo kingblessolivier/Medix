@@ -34,6 +34,7 @@ from commerce.models import (
     GoodsReceiptLine,
     GoodsReceiptStatus,
     OrderEvent,
+    PriceTier,
     PurchaseOrder,
     PurchaseOrderLine,
     PurchaseOrderStatus,
@@ -158,6 +159,7 @@ def publish_listing(
     availability: str = Availability.AVAILABLE_NOW,
     moq: int = 1,
     lead_time_days: int = 1,
+    srp: int | None = None,
     offered_base: int | None = None,
     performed_by: User | None = None,
     acknowledged: list[str] | None = None,
@@ -205,6 +207,10 @@ def publish_listing(
         "is_active": True,
         "modified_by": performed_by,
     }
+    # Only overwritten when given: a depot that reprices without touching
+    # the suggested retail price has not withdrawn it.
+    if srp is not None:
+        defaults["srp"] = srp
     if offered_base is not None:
         defaults["offered_base"] = offered_base
 
@@ -343,9 +349,12 @@ def add_order_line(
     # One line per product and unit. Two lines of the same product in
     # different units is a legitimate order — a carton plus a loose pack —
     # so the unit is part of the identity, not just the price.
-    line = order.lines.filter(
-        product=listing.product, uom=chosen, unit_price=_unit_price(listing, chosen)
-    ).first()
+    #
+    # Matched without the price. Volume breaks move the price as the
+    # quantity grows, so including it would open a second line at the
+    # moment a tier engaged and then deny the buyer the tier, because
+    # neither line would reach the threshold alone.
+    line = order.lines.filter(product=listing.product, uom=chosen).first()
     existing_base = line.quantity_base if line is not None else 0
     resulting_base = existing_base + added_base
 
@@ -363,12 +372,18 @@ def add_order_line(
             meta={"moq_base": moq_base, "requested_base": resulting_base},
         )
 
-    unit_price = _unit_price(listing, chosen)
+    # Priced against the whole line, not the amount just added: a tier is
+    # earned by what the buyer is ordering, not by how many clicks it
+    # took them to get there.
+    unit_price = _unit_price(listing, chosen, resulting_base)
     if line is not None:
         line.quantity += quantity
         line.quantity_base = resulting_base
+        line.unit_price = unit_price
         line.line_total = unit_price * line.quantity
-        line.save(update_fields=["quantity", "quantity_base", "line_total"])
+        line.save(
+            update_fields=["quantity", "quantity_base", "unit_price", "line_total"]
+        )
     else:
         line = PurchaseOrderLine.objects.create(
             order=order,
@@ -383,7 +398,28 @@ def add_order_line(
     return line
 
 
-def _unit_price(listing: VendorListing, uom: UnitOfMeasure) -> int:
+def tier_price(listing: VendorListing, quantity_base: int) -> int:
+    """The listing price after any volume break the order qualifies for.
+
+    Thresholds are in the listing's own unit, so the order quantity is
+    converted down to that unit before comparing — a buyer ordering two
+    cartons qualifies for a "24 packs or more" tier, and comparing carton
+    count against a pack threshold would silently deny it.
+
+    The best qualifying tier wins rather than the last one matched, so
+    tiers entered out of order still price correctly.
+    """
+    qualifying = quantity_base // listing.price_uom.factor_to_base
+    best = listing.price
+    for tier in listing.tiers.all():
+        if qualifying >= tier.min_quantity:
+            best = min(best, tier.price)
+    return best
+
+
+def _unit_price(
+    listing: VendorListing, uom: UnitOfMeasure, quantity_base: int | None = None
+) -> int:
     """The listing price restated in `uom`.
 
     Derived, never stored: a listing that reprices must not leave a
@@ -391,13 +427,62 @@ def _unit_price(listing: VendorListing, uom: UnitOfMeasure) -> int:
     buying loose is never cheaper per unit than buying the pack — see
     core.pricing.
     """
+    base_price = (
+        listing.price if quantity_base is None else tier_price(listing, quantity_base)
+    )
     if uom.id == listing.price_uom_id:
-        return listing.price
+        return base_price
     return pricing.derive(
-        Money(listing.price, listing.currency),
+        Money(base_price, listing.currency),
         from_uom=listing.price_uom,
         to_uom=uom,
     ).price.amount
+
+
+@transaction.atomic
+def set_price_tiers(
+    *,
+    listing: VendorListing,
+    tiers: list[tuple[int, int]],
+    performed_by: User | None = None,
+) -> list[PriceTier]:
+    """Replace a listing's volume breaks.
+
+    Refuses a tier priced at or above the one below it. A threshold that
+    costs more per unit than a smaller order is either a typo or a trap,
+    and either way a buyer who trips it has been overcharged for ordering
+    more.
+    """
+    ordered = sorted(tiers)
+    previous_price = listing.price
+    for min_quantity, price in ordered:
+        if min_quantity <= 1:
+            raise DomainError(
+                "A volume break starts above one.", code="tier_threshold_too_low"
+            )
+        if price >= previous_price:
+            raise DomainError(
+                f"The {min_quantity}+ tier is not cheaper than the one below it.",
+                code="tier_not_cheaper",
+                meta={"min_quantity": min_quantity, "price": price},
+            )
+        previous_price = price
+
+    listing.tiers.all().delete()
+    created = PriceTier.objects.bulk_create(
+        [
+            PriceTier(listing=listing, min_quantity=min_quantity, price=price)
+            for min_quantity, price in ordered
+        ]
+    )
+    audit.record(
+        action="commerce.listing.tiers_set",
+        subject=listing,
+        actor=performed_by,
+        after={"tiers": [{"min": q, "price": p} for q, p in ordered]},
+        organization=listing.organization,
+    )
+    return created
 
 
 def _recalculate_order(order: PurchaseOrder) -> None:

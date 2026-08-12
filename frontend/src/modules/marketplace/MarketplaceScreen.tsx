@@ -449,6 +449,19 @@ function CompareModal({
     ? Math.floor(row.available_base / chosen.factor_to_base)
     : 0;
 
+  // Volume thresholds are quoted in the depot's own unit, so the buyer's
+  // quantity converts down before comparing — two cartons must qualify
+  // for a "24 packs" break, and comparing carton count against a pack
+  // threshold would silently deny it.
+  const priceUomFactor =
+    row.units.find((u) => u.code === row.uom_code)?.factor_to_base ?? 1;
+  const inPriceUom = chosen
+    ? Math.floor(((valid ? count : 0) * chosen.factor_to_base) / priceUomFactor)
+    : 0;
+  const nextTier = row.tiers
+    .filter((tier) => tier.min_quantity > inPriceUom)
+    .sort((a, b) => a.min_quantity - b.min_quantity)[0];
+
   return (
     <Modal
       open
@@ -550,9 +563,43 @@ function CompareModal({
               : "—",
           ],
           ["Order value", CURRENCY.format(lineTotal)],
+          ...(row.srp !== null
+            ? ([
+                [
+                  `Suggested retail per ${row.uom_code.toLowerCase()}`,
+                  CURRENCY.format(row.srp),
+                ],
+              ] as [string, string][])
+            : []),
         ]}
       />
 
+      {/* Info, never a warning: it costs the buyer nothing to ignore, and
+          a soft stop on "you could spend more" would be the system
+          selling rather than informing. */}
+      {nextTier && (
+        <Banner tone="info" className="mt-4">
+          {`${nextTier.min_quantity - inPriceUom} more ${row.uom_code.toLowerCase()} at ${CURRENCY.format(nextTier.price)} each`}
+        </Banner>
+      )}
+
+      {row.tiers.length > 0 && (
+        <>
+          <h3 className="mb-2 mt-6 text-section font-semibold">Volume price</h3>
+          <DetailList
+            rows={[
+              [`1+ ${row.uom_code.toLowerCase()}`, CURRENCY.format(row.price)],
+              ...row.tiers.map(
+                (tier) =>
+                  [
+                    `${tier.min_quantity}+ ${row.uom_code.toLowerCase()}`,
+                    CURRENCY.format(tier.price),
+                  ] as [string, string],
+              ),
+            ]}
+          />
+        </>
+      )}
     </Modal>
   );
 }

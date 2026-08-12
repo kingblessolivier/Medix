@@ -57,6 +57,14 @@ class VendorListing(TenantModel):
     currency = models.CharField(max_length=3, default="RWF")
     price_uom = models.ForeignKey(UnitOfMeasure, on_delete=models.PROTECT, related_name="+")
 
+    #: What the depot suggests the pharmacy sells it for. Travels in the
+    #: transfer payload so the buyer's retail price starts from a real
+    #: number rather than from a guess — and is overridable, because a
+    #: supplier setting a retail price would be price maintenance.
+    srp = models.BigIntegerField(
+        null=True, blank=True, help_text="Suggested retail price, per price_uom"
+    )
+
     moq = models.IntegerField(default=1, help_text="Minimum order quantity, in price_uom")
     lead_time_days = models.IntegerField(default=1)
     is_active = models.BooleanField(default=True)
@@ -98,6 +106,43 @@ class VendorListing(TenantModel):
     def available_base(self) -> int:
         """What a new order may take: offered, less what is already spoken for."""
         return max(0, self.offered_base - self.committed_base)
+
+
+class PriceTier(BaseModel):
+    """A volume break on a listing.
+
+    Quantities are in the listing's `price_uom`, not base units: a depot
+    quoting "50 boxes or more" thinks in boxes, and converting the
+    threshold to tablets would make the rule unreadable to the person
+    who set it.
+
+    Tiers must descend — a higher threshold at a higher price is either a
+    typo or a trap, and `commerce.services.set_price_tiers` refuses it.
+    """
+
+    listing = models.ForeignKey(
+        VendorListing, on_delete=models.CASCADE, related_name="tiers"
+    )
+    min_quantity = models.IntegerField(help_text="In the listing's price_uom")
+    price = models.BigIntegerField(help_text="Per price_uom, minor units")
+
+    class Meta:
+        db_table = "commerce_price_tier"
+        ordering = ["min_quantity"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["listing", "min_quantity"], name="uq_price_tier_threshold"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(min_quantity__gt=1), name="ck_price_tier_threshold"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(price__gte=0), name="ck_price_tier_price"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.min_quantity}+ @ {self.price}"
 
 
 class TradingRelationship(TenantModel):
