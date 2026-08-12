@@ -10,6 +10,7 @@ See docs/05-modules.md §3–§5.
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import date
 
 from django.db import transaction
@@ -44,6 +45,9 @@ from commerce.models import (
 from documents import services as documents
 from inventory import services as inventory
 from inventory.models import Batch, Location, MovementKind, StockStatus
+
+
+log = logging.getLogger(__name__)
 
 
 class NotOrderable(DomainError):
@@ -709,6 +713,8 @@ def dispatch_order(
     documents.issue_picking_ticket(shipment=shipment, performed_by=performed_by)
     documents.issue_delivery_note(shipment=shipment, performed_by=performed_by)
 
+    _notify_buyer(shipment=shipment, performed_by=performed_by)
+
     audit.record(
         action="commerce.shipment.dispatched",
         subject=shipment,
@@ -726,6 +732,39 @@ def dispatch_order(
         order, performed_by=performed_by, document_number=shipment.number
     )
     return shipment
+
+
+def _notify_buyer(*, shipment: Shipment, performed_by: User) -> None:
+    """Seed the buyer's goods receipt from what actually shipped.
+
+    Both organizations are on this instance, so the advance notice is a
+    service call rather than a file. The buyer still receives a **draft**:
+    nothing enters their ledger until someone has counted the cartons.
+
+    A failure here must not roll back the dispatch. The goods have left;
+    the delivery note is issued and the stock has moved. A missing
+    pre-fill means the receiver types the delivery note in by hand, which
+    is exactly where they were before this existed.
+    """
+    from commerce import payloads
+
+    order = shipment.order
+    try:
+        # A savepoint, so a failure here rolls back the pre-fill without
+        # poisoning the dispatch transaction around it.
+        with transaction.atomic():
+            payloads.apply_transfer_payload(
+                payload=payloads.build_transfer_payload(shipment=shipment),
+                organization=order.organization,
+                location=order.deliver_to,
+                performed_by=performed_by,
+                order=order,
+            )
+    except Exception:
+        log.exception(
+            "Advance notice failed for %s; the buyer will key the delivery note",
+            shipment.number,
+        )
 
 
 def _update_dispatch_progress(

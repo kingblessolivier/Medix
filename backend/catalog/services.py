@@ -205,3 +205,113 @@ def mirror_product(*, organization, source: Product, performed_by=None) -> Produ
             created_by=performed_by,
         )
     return mirrored
+
+
+class UnidentifiableProduct(DomainError):
+    default_code = "unidentifiable_product"
+    default_detail = "A transferred product needs a registration number or a GTIN."
+
+
+def ensure_product(*, organization, descriptor: dict, performed_by=None) -> Product:
+    """Resolve a product described by a transfer payload, creating it if new.
+
+    The dict form of `mirror_product`. A payload that arrives from another
+    instance has no source row to copy from — only what the depot wrote
+    into it — so identity has to be re-established from the national
+    identifiers alone.
+
+    Registration number, then GTIN. **Never name.** A payload that carries
+    neither is refused rather than name-matched: matching on a name would
+    attach a real batch of somebody's medicine to whichever local row
+    happened to be spelled the same way.
+    """
+    registration_number = (descriptor.get("registration_number") or "").strip()
+    gtin = (descriptor.get("gtin") or "").strip()
+
+    if not registration_number and not gtin:
+        raise UnidentifiableProduct(
+            f"{descriptor.get('name', 'This product')} carries no registration "
+            "number and no barcode.",
+            meta={"name": descriptor.get("name", "")},
+        )
+
+    if registration_number:
+        existing = Product.objects.filter(
+            organization=organization,
+            registration__registration_number=registration_number,
+        ).first()
+        if existing is not None:
+            return existing
+
+    if gtin:
+        existing = Product.objects.filter(organization=organization, gtin=gtin).first()
+        if existing is not None:
+            return existing
+
+    product_type, _ = ProductType.objects.get_or_create(
+        organization=organization,
+        code=descriptor.get("product_type", "MEDICINE"),
+        defaults={"name": descriptor.get("product_type_name", "Medicine")},
+    )
+
+    product = Product.objects.create(
+        organization=organization,
+        product_type=product_type,
+        name=descriptor.get("name", ""),
+        generic_name=descriptor.get("generic_name", ""),
+        brand=descriptor.get("brand", ""),
+        legal_status=descriptor.get("legal_status", "OTC"),
+        controlled_schedule=descriptor.get("controlled_schedule") or "",
+        tax_treatment=descriptor.get("tax_treatment", "STANDARD"),
+        cold_chain=bool(descriptor.get("cold_chain")),
+        gtin=gtin,
+        dosage_form=descriptor.get("dosage_form") or "",
+        strength=descriptor.get("strength") or "",
+        route=descriptor.get("route") or "",
+        storage_min_c=descriptor.get("storage_min_c"),
+        storage_max_c=descriptor.get("storage_max_c"),
+        light_sensitive=bool(descriptor.get("light_sensitive")),
+        moisture_sensitive=bool(descriptor.get("moisture_sensitive")),
+        created_by=performed_by,
+    )
+
+    # Factor for factor. Every ledger quantity is stored in base units, so
+    # a pack meaning 24 at the depot and 12 here would corrupt the
+    # received quantity rather than fail loudly.
+    units = descriptor.get("units") or []
+    if not any(unit.get("is_base") for unit in units):
+        raise DomainError(
+            f"{product.name} arrived without a base unit.", code="no_base_unit"
+        )
+    UnitOfMeasure.objects.bulk_create(
+        [
+            UnitOfMeasure(
+                organization=organization,
+                product=product,
+                code=unit["code"],
+                name=unit.get("name", unit["code"].title()),
+                factor_to_base=unit["factor_to_base"],
+                is_base=bool(unit.get("is_base")),
+                is_purchase_default=bool(unit.get("is_purchase_default")),
+                is_dispense_default=bool(unit.get("is_dispense_default")),
+                is_sellable=unit.get("is_sellable", True),
+            )
+            for unit in units
+        ]
+    )
+
+    if registration_number:
+        from catalog.models import ProductRegistration
+
+        ProductRegistration.objects.create(
+            organization=organization,
+            product=product,
+            registration_number=registration_number,
+            strength=descriptor.get("strength") or "",
+            dosage_form=descriptor.get("dosage_form") or "",
+            route=descriptor.get("route") or "",
+            manufacturer=(descriptor.get("manufacturer") or {}).get("name", ""),
+            manufacturer_country=(descriptor.get("manufacturer") or {}).get("country", ""),
+            created_by=performed_by,
+        )
+    return product

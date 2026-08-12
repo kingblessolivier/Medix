@@ -142,7 +142,7 @@ class TestTimeline:
         order = draft(trade)
         services.request_approval(order=order, performed_by=trade["buyer"])
 
-        event = order.events.latest("occurred_at")
+        event = order.events.last()
         assert event.from_status == PurchaseOrderStatus.DRAFT
         assert event.to_status == PurchaseOrderStatus.PENDING_APPROVAL
         assert event.actor_id == trade["buyer"].id
@@ -153,7 +153,7 @@ class TestTimeline:
         services.request_approval(order=order, performed_by=trade["buyer"])
         services.submit_order(order=order, performed_by=trade["owner"])
 
-        event = order.events.latest("occurred_at")
+        event = order.events.last()
         assert event.to_status == PurchaseOrderStatus.SUBMITTED
         assert event.document_number == order.number
         assert event.document_number.startswith("PO-")
@@ -164,7 +164,7 @@ class TestTimeline:
         services.reject_order(
             order=order, performed_by=trade["owner"], reason="Wrong strength."
         )
-        assert order.events.latest("occurred_at").note == "Wrong strength."
+        assert order.events.last().note == "Wrong strength."
 
     def test_both_sides_appear_on_one_timeline(self, trade):
         """The point of a separate table from AuditEvent."""
@@ -184,7 +184,7 @@ class TestTimeline:
         shipment = services.dispatch_order(
             order=order, from_location=trade["depot"], performed_by=trade["seller"]
         )
-        event = order.events.latest("occurred_at")
+        event = order.events.last()
         assert event.to_status == PurchaseOrderStatus.DISPATCHED
         assert event.document_number == shipment.number
 

@@ -284,7 +284,11 @@ class OrderEvent(BaseModel):
 
     class Meta:
         db_table = "commerce_order_event"
-        ordering = ["occurred_at"]
+        # Two transitions in the same millisecond tie on occurred_at — the
+        # clock is coarser than the code — and the database is then free
+        # to return them in either order. The id is a uuid7, so it sorts
+        # by creation and keeps the sequence readable.
+        ordering = ["occurred_at", "id"]
         indexes = [models.Index(fields=["order", "occurred_at"])]
 
     def __str__(self) -> str:
@@ -355,6 +359,15 @@ class GoodsReceipt(TenantModel):
     #: rather than accepts.
     transport_temperature_ok = models.BooleanField(null=True, blank=True)
 
+    # -- pre-filled from the supplier's advance notice ---------------------
+    #
+    # The delivery note number this receipt was seeded from, so a clerk
+    # holding the paper can find the draft, and the hash of the payload
+    # that seeded it — a retransmitted notice must return the receipt it
+    # already created rather than open a second one.
+    transfer_id = models.CharField(max_length=30, blank=True)
+    transfer_hash = models.CharField(max_length=64, blank=True)
+
     class Meta:
         db_table = "commerce_goods_receipt"
         ordering = ["-created_at"]
@@ -363,6 +376,11 @@ class GoodsReceipt(TenantModel):
                 fields=["organization", "number"],
                 condition=~models.Q(number=""),
                 name="uq_grn_number",
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "transfer_hash"],
+                condition=~models.Q(transfer_hash=""),
+                name="uq_grn_transfer",
             ),
         ]
 

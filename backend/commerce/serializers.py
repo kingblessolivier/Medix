@@ -380,6 +380,19 @@ class GoodsReceiptSerializer(serializers.ModelSerializer):
         ]
 
 
+class ImportTransferSerializer(serializers.Serializer):
+    """A supplier's advance notice, arriving as a file.
+
+    The payload is taken as an opaque dict and validated by
+    `commerce.payloads` against its schema version — restating the shape
+    here would give two definitions of it that could disagree.
+    """
+
+    payload = serializers.JSONField()
+    location = serializers.UUIDField()
+    order = serializers.UUIDField(required=False, allow_null=True)
+
+
 class StartReceiptSerializer(serializers.Serializer):
     location = serializers.UUIDField()
     order = serializers.UUIDField(required=False, allow_null=True)

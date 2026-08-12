@@ -18,7 +18,7 @@ from rest_framework.views import APIView
 
 from catalog import services as catalog_services
 from catalog.models import Product, UnitOfMeasure
-from commerce import services
+from commerce import payloads, services
 from commerce.models import (
     Availability,
     GoodsReceipt,
@@ -34,6 +34,7 @@ from commerce.serializers import (
     AddReceiptLineSerializer,
     DispatchSerializer,
     GoodsReceiptSerializer,
+    ImportTransferSerializer,
     MarketplaceRowSerializer,
     PublishListingSerializer,
     PurchaseOrderSerializer,
@@ -323,6 +324,20 @@ class PurchaseOrderViewSet(
         )
         return Response(ShipmentSerializer(shipment).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["get"], url_path="transfer-payload")
+    def transfer_payload(self, request, pk=None):
+        """The advance notice, as a file.
+
+        The in-network path already seeded the buyer's receipt at
+        dispatch. This is for a buyer running elsewhere: they download it
+        and post it to their own `/goods-receipts/import-transfer/`.
+        """
+        order = self.get_object()
+        shipment = order.shipments.order_by("-dispatched_at").first()
+        if shipment is None:
+            raise DomainError("Nothing has shipped yet.", code="no_shipment")
+        return Response(payloads.build_transfer_payload(shipment=shipment))
+
     @action(detail=True, methods=["get"], url_path="shipments")
     def shipments(self, request, pk=None):
         """Delivery notes against this order — the buyer reads these too."""
@@ -373,6 +388,35 @@ class GoodsReceiptViewSet(
             GoodsReceipt.tenant_objects.select_related("supplier", "location", "order")
             .prefetch_related("lines__product", "lines__uom")
             .all()
+        )
+
+    @action(detail=False, methods=["post"], url_path="import-transfer")
+    def import_transfer(self, request):
+        """Apply a supplier's advance notice, from a file.
+
+        Returns a **draft** receipt. The payload says what was sent; only
+        the person at the door can say what arrived, so the lines are
+        pre-filled and still correctable.
+        """
+        serializer = ImportTransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        location = get_object_or_404(Location.tenant_objects, pk=data["location"])
+        order = (
+            get_object_or_404(PurchaseOrder.tenant_objects, pk=data["order"])
+            if data.get("order")
+            else None
+        )
+        receipt = payloads.apply_transfer_payload(
+            payload=data["payload"],
+            organization=request.user.organization,
+            location=location,
+            performed_by=request.user,
+            order=order,
+        )
+        return Response(
+            GoodsReceiptSerializer(receipt).data, status=status.HTTP_201_CREATED
         )
 
     def create(self, request):
