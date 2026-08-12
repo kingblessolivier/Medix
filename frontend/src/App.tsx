@@ -46,22 +46,26 @@ export default function App() {
   const sites = locations.data?.results ?? [];
   const mainLocation = (sites.find((l) => l.code === "MAIN") ?? sites[0])?.id;
 
+  function signIn() {
+    setSignedIn(true);
+    // clear(), not invalidate(): a failed `me` from the previous session
+    // stays in error state through an invalidation, and the guard below
+    // then signs the user straight back out on a successful login. Only
+    // clearing drops the error with the rest of the old session.
+    queryClient.clear();
+  }
+
   if (!signedIn) {
-    return (
-      <LoginScreen
-        onSignedIn={() => {
-          setSignedIn(true);
-          queryClient.invalidateQueries();
-        }}
-      />
-    );
+    return <LoginScreen onSignedIn={signIn} />;
   }
 
   // A dead token that cannot refresh returns the user to sign-in rather
-  // than leaving them on an empty shell.
-  if (me.isError) {
+  // than leaving them on an empty shell. Waiting for the fetch to settle
+  // matters: acting while it is still in flight logs out someone who has
+  // just successfully authenticated.
+  if (me.isError && !me.isFetching) {
     logout();
-    return <LoginScreen onSignedIn={() => setSignedIn(true)} />;
+    return <LoginScreen onSignedIn={signIn} />;
   }
 
   const granted = capabilities.data?.capabilities ?? [];

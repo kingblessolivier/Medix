@@ -83,13 +83,25 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
       api.marketplace(`?exclude_own=true${search ? `&search=${encodeURIComponent(search)}` : ""}`),
   });
 
+  // Counts describe the whole catalogue, not the page in hand — a tab
+  // reading "Medicines 28" when the depot lists 34 is a number someone
+  // makes a purchasing decision on.
+  const facets = useQuery({
+    queryKey: ["marketplace-facets", search],
+    queryFn: () =>
+      api.marketplaceFacets(
+        `?exclude_own=true${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+      ),
+  });
+
   const all = listings.data?.results ?? [];
+  const byType = new Map(facets.data?.types.map((t) => [t.code, t.count]) ?? []);
 
   const tabs: TableTab[] = KINDS.map((k) => ({
     id: k.id,
     label: k.label,
     icon: k.icon,
-    count: k.match ? all.filter((r) => r.product_type_code === k.match).length : all.length,
+    count: k.match ? (byType.get(k.match) ?? 0) : (facets.data?.total ?? all.length),
   }));
 
   const byKind = all.filter(
@@ -98,7 +110,11 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
 
   // Therapeutic categories present in the current kind, so the chips
   // never offer a filter that would empty the table.
-  const categories = [...new Set(byKind.map((r) => r.category_name).filter(Boolean))].sort() as string[];
+  const categories = (
+    kind === "all"
+      ? (facets.data?.categories.map((c) => c.name) ?? [])
+      : [...new Set(byKind.map((r) => r.category_name).filter(Boolean))].sort()
+  ) as string[];
 
   const rows = byKind.filter((r) => !category || r.category_name === category);
 
@@ -169,7 +185,7 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
         description="Products from wholesale pharmacies"
         actions={
           <span className="text-body text-text-2">
-            {rows.length.toLocaleString()} listings
+            {(facets.data?.total ?? rows.length).toLocaleString()} listings
           </span>
         }
       />

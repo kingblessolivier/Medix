@@ -285,6 +285,13 @@ export type MarketplaceRow = {
 };
 
 
+/** Counts over the whole result set, not the page the screen holds. */
+export type MarketplaceFacets = {
+  total: number;
+  types: { code: string; count: number }[];
+  categories: { name: string; count: number }[];
+};
+
 export type OrderLine = {
   id: string;
   product: string;
@@ -425,6 +432,9 @@ export const api = {
   capabilities: () => request<Capabilities>("/capabilities/"),
   marketplace: (params = "") =>
     request<Paginated<MarketplaceRow>>(`/marketplace/${params}`),
+
+  marketplaceFacets: (params = "") =>
+    request<MarketplaceFacets>(`/marketplace/facets/${params}`),
 
   orders: () => request<Paginated<PurchaseOrder>>("/purchase-orders/"),
   order: (id: string) => request<PurchaseOrder>(`/purchase-orders/${id}/`),

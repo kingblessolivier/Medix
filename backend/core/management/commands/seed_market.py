@@ -190,6 +190,16 @@ class Command(BaseCommand):
                             reason="Opening balance",
                         )
 
+                # A depot publishes a slice of what it holds, not all of
+                # it — some stays back for its own branches and standing
+                # contracts. Offering nothing would be the honest default
+                # for a fresh listing, but it leaves a demo where nothing
+                # can be ordered.
+                on_hand = inventory.balance_for(
+                    organization=wholesale, product=product
+                )
+                offered = int(on_hand * rng.choice([0.5, 0.6, 0.75, 0.8]))
+
                 publish_listing(
                     organization=wholesale,
                     product=product,
@@ -198,6 +208,7 @@ class Command(BaseCommand):
                     availability=availability,
                     moq=rng.choice([1, 2, 5, 10, 20]),
                     lead_time_days=rng.choice([1, 1, 2, 3, 7, 21]),
+                    offered_base=offered,
                 )
 
             jean, created = User.objects.get_or_create(

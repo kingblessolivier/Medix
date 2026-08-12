@@ -7,7 +7,7 @@ and every other resource here stays scoped as usual.
 
 from __future__ import annotations
 
-from django.db.models import OuterRef, Subquery
+from django.db.models import Count, F, OuterRef, Subquery
 from django.utils import timezone
 from django_filters import rest_framework as filters
 from rest_framework import mixins, status, viewsets
@@ -118,6 +118,35 @@ class MarketplaceViewSet(viewsets.ReadOnlyModelViewSet):
         if search:
             qs = qs.filter(product__name__icontains=search)
         return qs
+
+
+    @action(detail=False, methods=["get"])
+    def facets(self, request):
+        """Counts by product type and category, over the whole result set.
+
+        The browse screen cannot count its own tabs: it holds one page,
+        so "Medicines 28" would mean "28 on this page" while the depot
+        actually lists 34. A buyer narrowing by a wrong count makes a
+        purchasing decision on a wrong number, so the counts come from the
+        same filtered queryset the list uses.
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        return Response(
+            {
+                "total": queryset.count(),
+                "types": list(
+                    queryset.values(code=F("product__product_type__code"))
+                    .annotate(count=Count("id"))
+                    .order_by("-count")
+                ),
+                "categories": list(
+                    queryset.exclude(product__category__isnull=True)
+                    .values(name=F("product__category__name"))
+                    .annotate(count=Count("id"))
+                    .order_by("name")
+                ),
+            }
+        )
 
 
 class ListingViewSet(
