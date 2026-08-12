@@ -256,6 +256,52 @@ export type Sale = {
 
 export type Location = { id: string; name: string; code: string };
 
+export type MarketplaceRow = {
+  id: string;
+  product: string;
+  product_name: string;
+  generic_name: string;
+  vendor: string;
+  vendor_name: string;
+  availability: string;
+  is_orderable: boolean;
+  price: number;
+  currency: string;
+  uom_code: string;
+  uom_name: string;
+  moq: number;
+  lead_time_days: number;
+  legal_status: string;
+  requires_prescription: boolean;
+  cold_chain: boolean;
+  stock_base: number;
+  earliest_expiry: string | null;
+};
+
+export type VendorRow = {
+  listing_id: string;
+  vendor_name: string;
+  price: number;
+  uom: string;
+  availability: string;
+  stock_base: number;
+  earliest_expiry: string | null;
+  moq: number;
+  lead_time_days: number;
+};
+
+/** Derived from held licences — decides which navigation to show. */
+export type Capabilities = {
+  capabilities: string[];
+  licences: {
+    kind: string;
+    number: string;
+    expiry: string;
+    status: string;
+    is_valid: boolean;
+  }[];
+};
+
 export const api = {
   me: () => request<Me>("/auth/me/"),
   stock: (params = "") => request<Paginated<StockRow>>(`/stock/${params}`),
@@ -279,4 +325,10 @@ export const api = {
     }),
   takePayment: (id: string, body: { method: string; amount: number }) =>
     request<Sale>(`/sales/${id}/payments/`, { method: "POST", body }),
+
+  capabilities: () => request<Capabilities>("/capabilities/"),
+  marketplace: (params = "") =>
+    request<Paginated<MarketplaceRow>>(`/marketplace/${params}`),
+  compareVendors: (product: string) =>
+    request<VendorRow[]>(`/marketplace/compare/?product=${product}`),
 };

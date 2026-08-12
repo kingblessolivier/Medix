@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { api, logout, tokens } from "@/lib/api";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
+import { MarketplaceScreen } from "@/modules/marketplace/MarketplaceScreen";
 import { PosScreen } from "@/modules/pos/PosScreen";
 
 export default function App() {
@@ -67,6 +68,8 @@ export default function App() {
           <InventoryScreen />
         ) : active === "pos" ? (
           <PosScreen locationId={mainLocation ?? null} />
+        ) : active === "marketplace" ? (
+          <MarketplaceScreen />
         ) : (
           <EmptyState
             heading="Not built yet"
