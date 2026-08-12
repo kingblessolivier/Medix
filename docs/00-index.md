@@ -103,3 +103,4 @@ Documentation is updated in the same pull request as the change it describes. St
 | A newly found risk | [11](11-risks.md) |
 | A domain term | [12](12-glossary.md) |
 | Anything user-visible | [CHANGELOG](../CHANGELOG.md) |
+- [28 — Distribution specification](28-distribution-spec.md) — depot-to-retail model, the schema reconciliation, and the open queue

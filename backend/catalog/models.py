@@ -103,6 +103,73 @@ class AttributeDefinition(TenantModel):
         return f"{self.product_type.code}.{self.code}"
 
 
+class Manufacturer(TenantModel):
+    """Who made it, and where.
+
+    Was a free-text string on the registration, which meant "Cipla",
+    "Cipla Ltd" and "CIPLA LIMITED" were three manufacturers. A depot
+    deciding what to import needs the country and the GMP status as
+    facts it can filter on, not prose.
+    """
+
+    name = models.CharField(max_length=150)
+    country_of_origin = models.CharField(max_length=80, blank=True)
+    #: Good Manufacturing Practice. A purchasing decision, not a label —
+    #: a depot may be barred from importing from an uncertified site.
+    gmp_certified = models.BooleanField(default=True)
+    gmp_expiry = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "catalog_manufacturer"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "name"], name="uq_manufacturer_name"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class DosageForm(models.TextChoices):
+    """How the medicine presents. Drives packaging and dispensing."""
+
+    TABLET = "TABLET", "Tablet"
+    CAPSULE = "CAPSULE", "Capsule"
+    SYRUP = "SYRUP", "Syrup"
+    SUSPENSION = "SUSPENSION", "Suspension"
+    INJECTION = "INJECTION", "Injection"
+    INFUSION = "INFUSION", "Infusion"
+    CREAM = "CREAM", "Cream"
+    OINTMENT = "OINTMENT", "Ointment"
+    GEL = "GEL", "Gel"
+    DROPS = "DROPS", "Drops"
+    INHALER = "INHALER", "Inhaler"
+    SUPPOSITORY = "SUPPOSITORY", "Suppository"
+    PATCH = "PATCH", "Patch"
+    POWDER = "POWDER", "Powder"
+    SACHET = "SACHET", "Sachet"
+    DEVICE = "DEVICE", "Device"
+    OTHER = "OTHER", "Other"
+
+
+class Route(models.TextChoices):
+    ORAL = "ORAL", "Oral"
+    TOPICAL = "TOPICAL", "Topical"
+    INTRAVENOUS = "INTRAVENOUS", "Intravenous"
+    INTRAMUSCULAR = "INTRAMUSCULAR", "Intramuscular"
+    SUBCUTANEOUS = "SUBCUTANEOUS", "Subcutaneous"
+    INHALATION = "INHALATION", "Inhalation"
+    OPHTHALMIC = "OPHTHALMIC", "Ophthalmic"
+    OTIC = "OTIC", "Otic"
+    NASAL = "NASAL", "Nasal"
+    RECTAL = "RECTAL", "Rectal"
+    VAGINAL = "VAGINAL", "Vaginal"
+    NOT_APPLICABLE = "NOT_APPLICABLE", "Not applicable"
+
+
 class Category(TenantModel):
     """Therapeutic category — antibiotic, analgesic, antihypertensive."""
 
@@ -143,6 +210,42 @@ class Product(TenantModel):
 
     gtin = models.CharField(max_length=14, blank=True, help_text="GS1 (01)")
     is_active = models.BooleanField(default=True)
+
+    # -- clinical identity -------------------------------------------------
+    #
+    # These were reachable only through ProductRegistration, which made a
+    # product without a registration unsearchable by form or strength —
+    # and consumables and cosmetics have no registration at all.
+    dosage_form = models.CharField(
+        max_length=20, choices=DosageForm.choices, blank=True
+    )
+    strength = models.CharField(max_length=60, blank=True, help_text='e.g. "500mg", "10mg/ml"')
+    route = models.CharField(max_length=20, choices=Route.choices, blank=True)
+    manufacturer = models.ForeignKey(
+        Manufacturer, null=True, blank=True, on_delete=models.PROTECT, related_name="products"
+    )
+
+    # -- storage and handling ---------------------------------------------
+    #
+    # Cold chain alone is too blunt. "2–8°C" and "below 25°C" are both
+    # constraints, and a depot has to prove it honoured the right one.
+    storage_min_c = models.DecimalField(
+        max_digits=4, decimal_places=1, null=True, blank=True
+    )
+    storage_max_c = models.DecimalField(
+        max_digits=4, decimal_places=1, null=True, blank=True
+    )
+    light_sensitive = models.BooleanField(default=False)
+    moisture_sensitive = models.BooleanField(default=False)
+
+    # -- logistics ---------------------------------------------------------
+    #: Of one base unit, in grams. Shipping is quoted on weight.
+    unit_weight_g = models.IntegerField(null=True, blank=True)
+    #: "L×W×H cm" of the outer pack, for load planning.
+    pack_dimensions = models.CharField(max_length=30, blank=True)
+
+    #: Below this, in base units, the pharmacy is told to reorder.
+    reorder_point_base = models.BigIntegerField(default=0)
 
     class Meta:
         db_table = "catalog_product"
