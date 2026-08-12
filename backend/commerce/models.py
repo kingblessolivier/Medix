@@ -177,6 +177,10 @@ class PurchaseOrder(TenantModel):
     )
     required_by = models.DateField(null=True, blank=True)
 
+    #: Copied from the trading relationship when the order is raised, so
+    #: renegotiating terms later does not silently restate old orders.
+    payment_terms_days = models.IntegerField(default=0)
+
     subtotal = models.BigIntegerField(default=0)
     currency = models.CharField(max_length=3, default="RWF")
 
@@ -482,3 +486,148 @@ class ShipmentLine(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.product.name} {self.batch_number}"
+
+
+# --------------------------------------------------------------------------
+# Invoicing and payment
+# --------------------------------------------------------------------------
+
+
+class InvoiceKind(models.TextChoices):
+    """A proforma is a request; a tax invoice is a debt.
+
+    They are deliberately different documents. A proforma is issued before
+    goods move — a new pharmacy, or a controlled line — and creates no
+    receivable. Treating one as the other either overstates what is owed
+    or lets goods leave against a document that never demanded payment.
+    """
+
+    PROFORMA = "PROFORMA", "Proforma invoice"
+    TAX = "TAX", "Commercial tax invoice"
+    CREDIT_NOTE = "CREDIT_NOTE", "Credit note"
+
+
+class InvoiceStatus(models.TextChoices):
+    DRAFT = "DRAFT", "Draft"
+    ISSUED = "ISSUED", "Issued"
+    PART_PAID = "PART_PAID", "Partly paid"
+    PAID = "PAID", "Paid"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
+class Invoice(TenantModel):
+    """What the depot is owed, and by when.
+
+    Owned by the seller. Totals are stored because an invoice is a legal
+    document that must still read the same in five years — the tax rate
+    that applied on the day is baked in, not re-derived from whatever the
+    rule table says later.
+    """
+
+    number = models.CharField(max_length=30, blank=True)
+    kind = models.CharField(max_length=20, choices=InvoiceKind.choices, default=InvoiceKind.TAX)
+    status = models.CharField(
+        max_length=20, choices=InvoiceStatus.choices, default=InvoiceStatus.DRAFT
+    )
+
+    order = models.ForeignKey(
+        PurchaseOrder, null=True, blank=True, on_delete=models.PROTECT, related_name="invoices"
+    )
+    customer = models.ForeignKey(
+        "core.Organization", on_delete=models.PROTECT, related_name="purchase_invoices"
+    )
+
+    issued_on = models.DateField(null=True, blank=True)
+    #: issued_on + the terms agreed when the order was raised.
+    due_on = models.DateField(null=True, blank=True)
+    payment_terms_days = models.IntegerField(default=0)
+
+    subtotal = models.BigIntegerField(default=0)
+    tax_total = models.BigIntegerField(default=0)
+    total = models.BigIntegerField(default=0)
+    currency = models.CharField(max_length=3, default="RWF")
+
+    class Meta:
+        db_table = "commerce_invoice"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "number"],
+                condition=~models.Q(number=""),
+                name="uq_invoice_number",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "status"]),
+            models.Index(fields=["customer", "status"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.number or f"draft invoice {self.id}"
+
+    @property
+    def settled(self) -> int:
+        """Paid so far. Queried, never read off a cached relation."""
+        return (
+            InvoicePayment.objects.filter(invoice=self).aggregate(
+                total=models.Sum("amount")
+            )["total"]
+            or 0
+        )
+
+    @property
+    def outstanding(self) -> int:
+        return max(0, self.total - self.settled)
+
+    def days_overdue(self, *, as_of=None) -> int:
+        as_of = as_of or timezone.localdate()
+        if self.due_on is None or self.outstanding == 0:
+            return 0
+        return max(0, (as_of - self.due_on).days)
+
+
+class InvoiceLine(BaseModel):
+    """One line, with the tax that applied on the day it was issued."""
+
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="lines")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="+")
+    uom = models.ForeignKey(UnitOfMeasure, on_delete=models.PROTECT, related_name="+")
+
+    description = models.CharField(max_length=200)
+    quantity = models.IntegerField()
+    unit_price = models.BigIntegerField()
+    line_subtotal = models.BigIntegerField()
+
+    #: Recorded, not just the rate: exempt and zero-rated both charge
+    #: nothing, but input VAT is reclaimable only on the latter.
+    tax_treatment = models.CharField(max_length=10)
+    tax_rate_basis_points = models.IntegerField(default=0)
+    tax_amount = models.BigIntegerField(default=0)
+
+    class Meta:
+        db_table = "commerce_invoice_line"
+
+    def __str__(self) -> str:
+        return self.description
+
+
+class InvoicePayment(TenantModel):
+    """Money actually received against an invoice."""
+
+    invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="payments")
+    amount = models.BigIntegerField()
+    method = models.CharField(max_length=20, default="TRANSFER")
+    reference = models.CharField(max_length=60, blank=True)
+    received_on = models.DateField(default=timezone.localdate)
+
+    class Meta:
+        db_table = "commerce_invoice_payment"
+        ordering = ["-received_on"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0), name="ck_invoice_payment_positive"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.amount} on {self.invoice}"

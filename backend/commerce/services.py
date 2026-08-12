@@ -17,6 +17,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from catalog.models import Product, UnitOfMeasure
+from commerce import invoicing
 from core import sequences
 from core.capabilities import Capability, require_capability
 from core.exceptions import DomainError, InsufficientStock
@@ -154,11 +155,17 @@ def start_order(
     performed_by: User,
     required_by: date | None = None,
 ) -> PurchaseOrder:
+    relationship = TradingRelationship.objects.filter(
+        organization=supplier, customer=organization
+    ).first()
     return PurchaseOrder.objects.create(
         organization=organization,
         supplier=supplier,
         deliver_to=deliver_to,
         required_by=required_by,
+        # Frozen at creation. Renegotiating terms next month must not
+        # quietly restate an order agreed under the old ones.
+        payment_terms_days=relationship.payment_terms_days if relationship else 0,
         created_by=performed_by,
     )
 
@@ -425,6 +432,13 @@ def confirm_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
         raise DomainError("Only the supplier can confirm an order.", code="not_supplier")
     if order.status != PurchaseOrderStatus.SUBMITTED:
         raise DomainError("This order is not awaiting confirmation.", code="order_not_submitted")
+
+    # Credit is checked here, counting this order. Checking only historic
+    # debt lets a pharmacy sitting at its limit place one more order every
+    # time, because the new one is never part of the sum.
+    invoicing.assert_within_credit(
+        supplier=order.supplier, customer=order.organization, pending=order.subtotal
+    )
 
     # Approving reserves the goods against the offer. Until now the
     # quantity was only requested; two buyers could each ask for the last

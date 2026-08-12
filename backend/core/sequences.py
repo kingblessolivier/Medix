@@ -22,6 +22,7 @@ PREFIXES = {
     "GOODS_RECEIPT": "GRN",
     "DELIVERY_NOTE": "DN",
     "INVOICE": "INV",
+    "PROFORMA": "PI",
     "CREDIT_NOTE": "CN",
     "IMPORT_REQUEST": "IR",
     "TRANSFER": "TRF",
