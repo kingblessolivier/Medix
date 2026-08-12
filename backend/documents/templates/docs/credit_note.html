@@ -1,0 +1,41 @@
+{% extends "docs/base_document.html" %}
+{% comment %}
+A correction, not a bill. It names the invoice it credits and the reason,
+because "500,000 off" is an amount while "500,000 off INV-2026-00412,
+short delivery" is something both sides can reconcile.
+
+No line table: a credit note is usually raised against a value rather
+than against specific lines, and printing an empty items grid would look
+like a document that failed to render.
+{% endcomment %}
+
+{% block meta %}
+<dt>Credits</dt><dd class="mono">{{ against }}</dd>
+{% if order_number %}<dt>Order</dt><dd class="mono">{{ order_number }}</dd>{% endif %}
+{% endblock %}
+
+{% block body %}
+<section class="section">
+  <h2 class="section-title">Credited · {{ currency }}</h2>
+  <div class="totals" style="justify-content:flex-start">
+    <dl>
+      <dt>Net</dt><dd>{{ subtotal }}</dd>
+      <dt>Tax</dt><dd>{{ tax_total }}</dd>
+      <div class="rule"></div>
+      <div class="grand"><dt>Total {{ currency }}</dt><dd>{{ total }}</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="section">
+  <p class="label">Reason</p>
+  <p>{{ reason }}</p>
+</section>
+{% endblock %}
+
+{% block attestation %}
+<p class="note">
+  This credit reduces the balance outstanding on {{ against }}. It is not a
+  request for payment.
+</p>
+{% endblock %}

@@ -671,6 +671,14 @@ class Invoice(TenantModel):
         "core.Organization", on_delete=models.PROTECT, related_name="purchase_invoices"
     )
 
+    #: What this credits or debits. A credit note is meaningless without
+    #: it: "500,000 off" is only an amount, "500,000 off INV-2026-00412"
+    #: is a correction someone can reconcile.
+    #: `AuditedModel.reason` carries why it was raised.
+    against = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="adjustments"
+    )
+
     issued_on = models.DateField(null=True, blank=True)
     #: issued_on + the terms agreed when the order was raised.
     due_on = models.DateField(null=True, blank=True)

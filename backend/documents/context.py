@@ -171,9 +171,14 @@ def invoice(invoice_record) -> dict:
     years, whatever the rule table says by then.
     """
     is_proforma = invoice_record.kind == "PROFORMA"
+    is_credit_note = invoice_record.kind == "CREDIT_NOTE"
     lines = invoice_record.lines.select_related("product", "uom")
     context = base(
-        doc_type="Proforma invoice" if is_proforma else "Commercial tax invoice",
+        doc_type=(
+            "Credit note"
+            if is_credit_note
+            else "Proforma invoice" if is_proforma else "Commercial tax invoice"
+        ),
         number=invoice_record.number,
         issuer=party(invoice_record.organization, licence_kind="WHOLESALE"),
         recipient=party(invoice_record.customer, licence_kind="RETAIL"),
@@ -191,6 +196,9 @@ def invoice(invoice_record) -> dict:
                 else f"Net {invoice_record.payment_terms_days} days"
             ),
             "is_proforma": is_proforma,
+            "is_credit_note": is_credit_note,
+            "against": invoice_record.against.number if invoice_record.against_id else "",
+            "reason": invoice_record.reason,
             "lines": [
                 {
                     "description": line.description,

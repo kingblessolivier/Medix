@@ -59,14 +59,31 @@ class AlreadyIssued(DomainError):
 
 
 def outstanding_for(*, supplier: Organization, customer: Organization) -> int:
-    """Unpaid tax invoices. A proforma is not a debt and is excluded."""
+    """Unpaid tax invoices, net of credit notes.
+
+    A proforma is not a debt and is excluded. A credit note is a debt
+    cancelled, so it comes off — a customer whose returned goods have
+    been credited must not still be counted against their limit for
+    goods they gave back.
+    """
     invoices = Invoice.objects.filter(
         organization=supplier,
         customer=customer,
         kind=InvoiceKind.TAX,
         status__in=[InvoiceStatus.ISSUED, InvoiceStatus.PART_PAID],
     )
-    return sum(invoice.outstanding for invoice in invoices)
+    owed = sum(invoice.outstanding for invoice in invoices)
+
+    credited = (
+        Invoice.objects.filter(
+            organization=supplier,
+            customer=customer,
+            kind=InvoiceKind.CREDIT_NOTE,
+            status__in=[InvoiceStatus.ISSUED, InvoiceStatus.PART_PAID, InvoiceStatus.PAID],
+        ).aggregate(total=models.Sum("total"))["total"]
+        or 0
+    )
+    return max(0, owed - credited)
 
 
 def credit_position(
@@ -177,22 +194,93 @@ def build_invoice(
 
 
 @transaction.atomic
-def issue_invoice(*, invoice: Invoice, performed_by: User) -> Invoice:
+def raise_credit_note(
+    *,
+    against: Invoice,
+    amount: int,
+    reason: str,
+    performed_by: User,
+    issued_on=None,
+) -> Invoice:
+    """Cancel part or all of an invoice, in the period it belongs to.
+
+    `issued_on` is settable and defaults to today. A credit note for a
+    November delivery agreed in January belongs to **November**: dating
+    it today would move the correction into a period where the sale never
+    happened, and both periods would then be wrong.
+
+    That backdating is precisely why the period figures are computed
+    rather than stored — see docs/28 §12.1.
+    """
+    if against.kind != InvoiceKind.TAX:
+        raise DomainError(
+            "Only a tax invoice can be credited.", code="not_creditable"
+        )
+    if against.status == InvoiceStatus.DRAFT:
+        raise DomainError("That invoice has not been issued.", code="invoice_draft")
+    if amount <= 0:
+        raise DomainError("A credit note must be positive.", code="non_positive_credit")
+    if not reason.strip():
+        raise DomainError("Give a reason for the credit.", code="reason_required")
+
+    already = (
+        Invoice.objects.filter(against=against, kind=InvoiceKind.CREDIT_NOTE).aggregate(
+            total=models.Sum("total")
+        )["total"]
+        or 0
+    )
+    if already + amount > against.total:
+        raise DomainError(
+            f"That would credit more than the {against.total:,} invoiced.",
+            code="over_credit",
+            meta={"invoiced": against.total, "already_credited": already},
+        )
+
+    # Tax comes off in the same proportion it went on. Crediting the
+    # gross and leaving the VAT would overstate what the depot owes the
+    # revenue authority for a sale that partly did not happen.
+    tax = (
+        (against.tax_total * amount) // against.total if against.total else 0
+    )
+    note = Invoice.objects.create(
+        organization=against.organization,
+        customer=against.customer,
+        order=against.order,
+        against=against,
+        kind=InvoiceKind.CREDIT_NOTE,
+        currency=against.currency,
+        subtotal=amount - tax,
+        tax_total=tax,
+        total=amount,
+        reason=reason.strip(),
+        created_by=performed_by,
+    )
+    return issue_invoice(invoice=note, performed_by=performed_by, issued_on=issued_on)
+
+
+@transaction.atomic
+def issue_invoice(*, invoice: Invoice, performed_by: User, issued_on=None) -> Invoice:
     """Number it, date it, and start the clock on the terms."""
     if invoice.status != InvoiceStatus.DRAFT:
         raise AlreadyIssued()
 
-    today = timezone.localdate()
+    # `issued_on` is settable so a credit note can be dated into the
+    # period it corrects rather than the period it was keyed in.
+    today = issued_on or timezone.localdate()
     invoice.number = sequences.next_number(
         invoice.organization,
-        "PROFORMA" if invoice.kind == InvoiceKind.PROFORMA else "INVOICE",
+        {
+            InvoiceKind.PROFORMA: "PROFORMA",
+            InvoiceKind.CREDIT_NOTE: "CREDIT_NOTE",
+        }.get(invoice.kind, "INVOICE"),
     )
     invoice.issued_on = today
-    # A proforma has no due date. It asks for payment before goods move;
-    # it is not a debt with a deadline attached.
+    # Neither a proforma nor a credit note has a due date. One asks for
+    # payment before goods move; the other cancels a debt rather than
+    # creating one.
     invoice.due_on = (
         None
-        if invoice.kind == InvoiceKind.PROFORMA
+        if invoice.kind in (InvoiceKind.PROFORMA, InvoiceKind.CREDIT_NOTE)
         else today + timedelta(days=invoice.payment_terms_days)
     )
     invoice.status = InvoiceStatus.ISSUED

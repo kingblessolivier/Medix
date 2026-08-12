@@ -1,0 +1,72 @@
+{% extends "docs/base_document.html" %}
+{% comment %}
+A regulated artifact with a witness, and the one document here that
+should read as a certificate rather than a delivery note — docs/18 names
+it as the exception. Hence the fuller signature block and the statement
+of destruction rather than a line-item grid.
+{% endcomment %}
+
+{% block meta %}
+<dt>Written off</dt><dd>{{ written_off_on }}</dd>
+<dt>Location</dt><dd>{{ location }}</dd>
+{% endblock %}
+
+{% block body %}
+<section class="section">
+  <h2 class="section-title">Stock destroyed</h2>
+  <table class="items">
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th>Batch</th>
+        <th>Expiry</th>
+        <th class="num">Quantity</th>
+        <th class="num">Unit cost</th>
+        <th class="num">Value {{ currency }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ product }}</td>
+        <td class="mono">{{ batch }}</td>
+        <td class="mono">{{ expiry }}</td>
+        <td class="num">{{ quantity }}</td>
+        <td class="num">{{ unit_cost }}</td>
+        <td class="num">{{ value }}</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="section">
+  <p class="label">Reason</p>
+  <p>{{ reason }}</p>
+</section>
+{% endblock %}
+
+{% block attestation %}
+<p>
+  The stock described above has been removed from saleable inventory and
+  destroyed. It has been written out of the stock ledger and its value
+  charged against the period in which the destruction took place.
+</p>
+
+<div class="signatures">
+  <div class="sig">
+    <p class="rule"></p>
+    <p class="who">Responsible pharmacist</p>
+    <p class="role">Name, council number, date</p>
+  </div>
+  <div class="sig">
+    {% if witness_name %}
+    <p class="who">{{ witness_name }}</p>
+    <p class="role">{{ witness_role }} · witness</p>
+    <p class="rule"></p>
+    {% else %}
+    <p class="rule"></p>
+    <p class="who">Witness</p>
+    <p class="role">Name, role, date</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -144,11 +144,10 @@ def issue_delivery_note(*, shipment, performed_by: User | None = None) -> Docume
 
 
 def issue_invoice(*, invoice_record, performed_by: User | None = None) -> Document:
-    kind = (
-        DocumentKind.PROFORMA
-        if invoice_record.kind == "PROFORMA"
-        else DocumentKind.TAX_INVOICE
-    )
+    kind = {
+        "PROFORMA": DocumentKind.PROFORMA,
+        "CREDIT_NOTE": DocumentKind.CREDIT_NOTE,
+    }.get(invoice_record.kind, DocumentKind.TAX_INVOICE)
     return issue(
         kind=kind,
         subject=invoice_record,
