@@ -57,6 +57,7 @@ def _resolve_uom(product: Product, code: str) -> UnitOfMeasure:
 
 class MarketplaceFilter(filters.FilterSet):
     product_type = filters.CharFilter(field_name="product__product_type__code")
+    category = filters.CharFilter(field_name="product__category__name")
     legal_status = filters.CharFilter(field_name="product__legal_status")
     cold_chain = filters.BooleanFilter(field_name="product__cold_chain")
     vendor = filters.UUIDFilter(field_name="organization_id")
@@ -83,7 +84,15 @@ class MarketplaceViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         qs = (
             VendorListing.objects.filter(is_active=True)
-            .select_related("organization", "product", "product__product_type", "price_uom")
+            .select_related(
+                "organization",
+                "product",
+                "product__product_type",
+                "product__category",
+                "product__registration",
+                "price_uom",
+            )
+            .prefetch_related("product__units")
             .annotate(
                 # A buyer comparing vendors needs to know whether the
                 # seller actually holds the goods, and how long that stock

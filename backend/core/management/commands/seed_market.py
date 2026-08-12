@@ -1,8 +1,17 @@
 """Seed a wholesale pharmacy with listings, so the marketplace is real.
 
 Idempotent: safe to re-run.
+
+Same catalogue as the retail seed, different sellability: a wholesaler
+trades cartons and packs and does not break a pack for one tablet. Both
+sides carry the same Rwanda FDA registration number, which is what lets
+a receiving pharmacy match a bought product to its own catalogue row
+instead of forking a duplicate.
 """
 
+from __future__ import annotations
+
+import random
 from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand
@@ -10,43 +19,21 @@ from django.db import transaction
 from django.utils import timezone
 
 from catalog.models import (
-    LegalStatus,
+    Category,
     Product,
+    ProductRegistration,
     ProductType,
-    ProductTypeCode,
-    TaxTreatment,
+    RegistrationStatus,
     UnitOfMeasure,
 )
+from catalog.reference import CATALOGUE, CATEGORIES
 from commerce.models import Availability, TradingRelationship
 from commerce.services import publish_listing
 from core.models import Branch, LicenceKind, Organization, PremisesLicence, User
 from core.quantity import Quantity
 from core.tenancy import organization_scope
 from inventory import services as inventory
-from inventory.models import Batch, Location, LocationKind, MovementKind
-
-CHAIN = [
-    ("CARTON", "Carton of 12 packs", 1200, False),
-    ("PACK", "Pack of 100", 100, False),
-    ("BLISTER", "Blister of 10", 10, False),
-    ("UNIT", "Unit", 1, True),
-]
-
-CATALOGUE = [
-    # name, generic, legal, tax, cold, price, moq, lead days, availability, packs
-    ("Amoxicillin 500mg", "amoxicillin", LegalStatus.POM, TaxTreatment.EXEMPT, False,
-     28000, 10, 1, Availability.AVAILABLE_NOW, 40),
-    ("Paracetamol 500mg", "paracetamol", LegalStatus.OTC, TaxTreatment.EXEMPT, False,
-     12000, 20, 1, Availability.AVAILABLE_NOW, 80),
-    ("Cetirizine 10mg", "cetirizine", LegalStatus.OTC, TaxTreatment.EXEMPT, False,
-     9500, 10, 2, Availability.AVAILABLE_NOW, 25),
-    ("Surgical gloves", "", LegalStatus.OTC, TaxTreatment.STANDARD, False,
-     14200, 5, 1, Availability.AVAILABLE_NOW, 60),
-    ("Insulin XYZ 100IU", "insulin", LegalStatus.POM, TaxTreatment.EXEMPT, True,
-     42000, 4, 21, Availability.INCOMING, 0),
-    ("Rare Antiviral 200mg", "antiviral", LegalStatus.POM, TaxTreatment.EXEMPT, False,
-     186000, 100, 45, Availability.IMPORT_ON_DEMAND, 0),
-]
+from inventory.models import Batch, Location, LocationKind, MovementKind, TemperatureClass
 
 
 class Command(BaseCommand):
@@ -54,6 +41,8 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        rng = random.Random(4417)
+
         wholesale, _ = Organization.objects.get_or_create(
             name="ABC Wholesale Pharmacy",
             defaults={"primary_kind": LicenceKind.WHOLESALE_PHARMACY, "tin": "100000002"},
@@ -77,61 +66,127 @@ class Command(BaseCommand):
                 organization=wholesale, code="DEPOT",
                 defaults={"name": "ABC Depot", "kind": LocationKind.STORE, "branch": branch},
             )
-            medicine, _ = ProductType.objects.get_or_create(
-                organization=wholesale, code=ProductTypeCode.MEDICINE,
-                defaults={"name": "Medicine"},
+            cold, _ = Location.objects.get_or_create(
+                organization=wholesale, code="WCOLD",
+                defaults={
+                    "name": "Depot cold room",
+                    "kind": LocationKind.STORE,
+                    "branch": branch,
+                    "temperature_class": TemperatureClass.COLD,
+                },
             )
 
-            for (name, generic, legal, tax, cold, price, moq, lead,
-                 availability, packs) in CATALOGUE:
+            categories = {
+                name: Category.objects.get_or_create(organization=wholesale, name=name)[0]
+                for name in CATEGORIES
+            }
+            types: dict[str, ProductType] = {}
+
+            for index, item in enumerate(CATALOGUE):
+                if item.kind not in types:
+                    types[item.kind] = ProductType.objects.get_or_create(
+                        organization=wholesale,
+                        code=item.kind,
+                        defaults={"name": item.kind.title()},
+                    )[0]
+
                 product, created = Product.objects.get_or_create(
-                    organization=wholesale, name=name,
+                    organization=wholesale, name=item.name,
                     defaults={
-                        "product_type": medicine,
-                        "generic_name": generic,
-                        "legal_status": legal,
-                        "tax_treatment": tax,
-                        "cold_chain": cold,
+                        "product_type": types[item.kind],
+                        "category": categories[item.category],
+                        "generic_name": item.generic,
+                        "brand": item.brand,
+                        "legal_status": item.legal,
+                        "controlled_schedule": "II" if item.legal == "CONTROLLED" else "",
+                        "tax_treatment": item.tax,
+                        "cold_chain": item.cold_chain,
+                        "gtin": item.gtin,
                     },
                 )
                 if created:
-                    for code, label, factor, is_base in CHAIN:
+                    for level in item.chain:
                         UnitOfMeasure.objects.create(
-                            organization=wholesale, product=product, code=code, name=label,
-                            factor_to_base=factor, is_base=is_base,
-                            is_purchase_default=(code == "PACK"), is_dispense_default=is_base,
+                            organization=wholesale,
+                            product=product,
+                            code=level.code,
+                            name=level.name,
+                            factor_to_base=level.factor,
+                            is_base=level.factor == 1,
+                            is_purchase_default=level.code == "CARTON",
+                            is_dispense_default=level.factor == 1,
+                            # A wholesaler will not break a pack.
+                            is_sellable=level.wholesale,
                         )
+                    ProductRegistration.objects.create(
+                        organization=wholesale,
+                        product=product,
+                        registration_number=item.registration,
+                        holder=item.brand or item.generic.title(),
+                        dosage_form=item.chain[-1].name,
+                        registered_on=date.today() - timedelta(days=rng.randint(400, 2200)),
+                        registration_expiry=date.today() + timedelta(days=rng.randint(120, 1500)),
+                        status=RegistrationStatus.REGISTERED,
+                    )
 
-                pack = UnitOfMeasure.objects.get(product=product, code="PACK")
+                # The trade unit: what the listing is priced in.
+                trade_uom = product.units.filter(
+                    code__in=("PACK", "BOX", "TIN", "BOTTLE", "TUBE")
+                ).first() or product.units.get(is_base=True)
 
-                if packs:
+                # A real marketplace is not uniformly in stock. Every
+                # eighth line is incoming, every eleventh import-only —
+                # so the browse screen has to show the states a buyer
+                # actually meets, not one happy row repeated.
+                if index % 11 == 10:
+                    availability = Availability.IMPORT_ON_DEMAND
+                elif index % 8 == 7:
+                    availability = Availability.INCOMING
+                else:
+                    availability = Availability.AVAILABLE_NOW
+
+                if availability == Availability.AVAILABLE_NOW:
                     batch, batch_created = Batch.objects.get_or_create(
                         organization=wholesale, product=product, supplier=None,
-                        batch_number=f"{name[:3].upper()}-W001",
+                        batch_number=f"{_code(item.name)}-W{1000 + index}",
                         defaults={
-                            "expiry_date": date.today() + timedelta(days=700),
-                            "unit_cost_base": price // 100,
-                            "cold_chain": cold,
+                            "expiry_date": date.today() + timedelta(days=rng.randint(300, 900)),
+                            "unit_cost_base": int(item.unit_cost * 0.82),
+                            "cold_chain": item.cold_chain,
                         },
                     )
                     if batch_created:
                         inventory.post_movement(
-                            organization=wholesale, location=depot, batch=batch,
+                            organization=wholesale,
+                            location=cold if item.cold_chain else depot,
+                            batch=batch,
                             kind=MovementKind.OPENING,
-                            quantity=Quantity(packs, pack),
+                            quantity=Quantity(rng.randint(20, 200), trade_uom),
                             reason="Opening balance",
                         )
 
                 publish_listing(
-                    organization=wholesale, product=product, price=price,
-                    price_uom=pack, availability=availability, moq=moq,
-                    lead_time_days=lead,
+                    organization=wholesale,
+                    product=product,
+                    price=item.pack_price,
+                    price_uom=trade_uom,
+                    availability=availability,
+                    moq=rng.choice([1, 2, 5, 10, 20]),
+                    lead_time_days=rng.choice([1, 1, 2, 3, 7, 21]),
                 )
 
-            User.objects.get_or_create(
+            jean, created = User.objects.get_or_create(
                 username="jean",
-                defaults={"organization": wholesale, "first_name": "Jean", "last_name": "Bizimana"},
+                defaults={
+                    "organization": wholesale,
+                    "first_name": "Jean",
+                    "last_name": "Bizimana",
+                    "is_staff": True,
+                },
             )
+            if created:
+                jean.set_password("medix-demo")
+                jean.save()
 
             retail = Organization.objects.filter(name="Kigali Care Pharmacy").first()
             if retail:
@@ -148,4 +203,13 @@ class Command(BaseCommand):
         from commerce.models import VendorListing
 
         self.stdout.write(self.style.SUCCESS(f"Seeded {wholesale.name}"))
-        self.stdout.write(f"  listings {VendorListing.objects.filter(organization=wholesale).count()}")
+        self.stdout.write(f"  products   {Product.objects.filter(organization=wholesale).count()}")
+        self.stdout.write(
+            f"  listings   {VendorListing.objects.filter(organization=wholesale).count()}"
+        )
+        self.stdout.write("  login      jean / medix-demo")
+
+
+def _code(name: str) -> str:
+    letters = [c for c in name.upper() if c.isalpha()]
+    return "".join(letters[:3]) or "GEN"

@@ -277,13 +277,13 @@ Provides: sticky header · sort · filter · search · column visibility · **de
 
 Header on `--content`, 12/600 in `--text-2`. Rows separated by `--border-hair`. Row height by density.
 
-### Drawer versus page
+### Modal versus page
 
 ```
-SEARCH → TABLE → DETAIL DRAWER → FULL TRANSACTION
+SEARCH → TABLE → DETAIL MODAL → FULL TRANSACTION
 ```
 
-**Drawer** for preview, quick edit, quick information, activity history. It keeps the user in context.
+**Modal**, centred, for preview, quick edit, quick information, activity history. It keeps the user in context.
 
 **Full page** for genuine workflows only: purchase order creation, import request, receiving, POS, prescription processing, insurance claim, product creation.
 

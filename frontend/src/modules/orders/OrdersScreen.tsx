@@ -30,7 +30,7 @@ import {
   StatusPill,
   type Tone,
 } from "@/components/ui";
-import { DetailList, Drawer } from "@/components/ui/Drawer";
+import { DetailList, Modal } from "@/components/ui/Modal";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
 const DAY = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" });
@@ -318,7 +318,7 @@ export function OrdersScreen({
         }
       />
 
-      <OrderDrawer
+      <OrderModal
         order={selected}
         side={side}
         onClose={() => setSelected(null)}
@@ -376,7 +376,7 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: s
   );
 }
 
-function OrderDrawer({
+function OrderModal({
   order,
   side,
   onClose,
@@ -433,7 +433,7 @@ function OrderDrawer({
     ) : undefined;
 
   return (
-    <Drawer
+    <Modal
       open
       title={order.number || "Draft order"}
       subtitle={side === "received" ? order.buyer_name : order.supplier_name}
@@ -462,6 +462,6 @@ function OrderDrawer({
         caption={`Items on ${order.number || "this order"}`}
         emptyHeading="No items"
       />
-    </Drawer>
+    </Modal>
   );
 }

@@ -261,6 +261,11 @@ export type MarketplaceRow = {
   product: string;
   product_name: string;
   generic_name: string;
+  brand: string;
+  category_name: string | null;
+  product_type_code: string;
+  /** Tablet, bottle, vial, pair — the base unit's name. */
+  dosage_form: string;
   vendor: string;
   vendor_name: string;
   availability: string;

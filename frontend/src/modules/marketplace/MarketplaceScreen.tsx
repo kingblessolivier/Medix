@@ -12,11 +12,27 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LayoutGrid, List, Plane, Plus, Snowflake } from "lucide-react";
+import {
+  Boxes,
+  LayoutGrid,
+  List,
+  Pill,
+  Plane,
+  Plus,
+  Snowflake,
+  Stethoscope,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiFailure, api, type MarketplaceRow, type VendorRow } from "@/lib/api";
-import { DataTable, DataToolbar, type Column, type Density } from "@/components/data/DataTable";
+import {
+  DataTable,
+  DataToolbar,
+  TableTabs,
+  type Column,
+  type Density,
+  type TableTab,
+} from "@/components/data/DataTable";
 import {
   Badge,
   Banner,
@@ -29,7 +45,7 @@ import {
   StatusPill,
   type Tone,
 } from "@/components/ui";
-import { DetailList, Drawer } from "@/components/ui/Drawer";
+import { DetailList, Modal } from "@/components/ui/Modal";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
 const MONTH = new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" });
@@ -42,10 +58,24 @@ const AVAILABILITY: Record<string, { tone: Tone; label: string }> = {
   NOT_IN_COUNTRY: { tone: "neutral", label: "Not in Rwanda" },
 };
 
+/* What a buyer narrows by first. A pharmacist restocking does not browse
+   an alphabetical list of everything the country sells — they ask for the
+   antibiotics, or the consumables. */
+const KINDS: { id: string; label: string; icon: typeof Pill; match?: string }[] = [
+  { id: "all", label: "All", icon: List },
+  { id: "MEDICINE", label: "Medicines", icon: Pill, match: "MEDICINE" },
+  { id: "CONSUMABLE", label: "Consumables", icon: Boxes, match: "CONSUMABLE" },
+  { id: "DEVICE", label: "Devices", icon: Stethoscope, match: "DEVICE" },
+  { id: "SUPPLEMENT", label: "Supplements", icon: Pill, match: "SUPPLEMENT" },
+  { id: "COSMETIC", label: "Personal care", icon: Boxes, match: "COSMETIC" },
+];
+
 export function MarketplaceScreen({ locationId }: { locationId: string | null }) {
   const [view, setView] = useState<"list" | "grid">("list");
   const [density, setDensity] = useState<Density>("compact");
   const [search, setSearch] = useState("");
+  const [kind, setKind] = useState("all");
+  const [category, setCategory] = useState<string | null>(null);
   const [compare, setCompare] = useState<MarketplaceRow | null>(null);
 
   const listings = useQuery({
@@ -54,7 +84,24 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
       api.marketplace(`?exclude_own=true${search ? `&search=${encodeURIComponent(search)}` : ""}`),
   });
 
-  const rows = listings.data?.results ?? [];
+  const all = listings.data?.results ?? [];
+
+  const tabs: TableTab[] = KINDS.map((k) => ({
+    id: k.id,
+    label: k.label,
+    icon: k.icon,
+    count: k.match ? all.filter((r) => r.product_type_code === k.match).length : all.length,
+  }));
+
+  const byKind = all.filter(
+    (r) => kind === "all" || r.product_type_code === kind,
+  );
+
+  // Therapeutic categories present in the current kind, so the chips
+  // never offer a filter that would empty the table.
+  const categories = [...new Set(byKind.map((r) => r.category_name).filter(Boolean))].sort() as string[];
+
+  const rows = byKind.filter((r) => !category || r.category_name === category);
 
   const columns: Column<MarketplaceRow>[] = [
     {
@@ -71,6 +118,14 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
       ),
       sortValue: (r) => r.product_name,
     },
+    {
+      key: "category",
+      header: "Category",
+      render: (r) => <span className="text-text-2">{r.category_name ?? "—"}</span>,
+      sortable: true,
+      sortValue: (r) => r.category_name ?? "",
+    },
+    { key: "form", header: "Form", render: (r) => <span className="text-text-2">{r.dosage_form}</span> },
     { key: "vendor", header: "Supplier", render: (r) => r.vendor_name },
     {
       key: "stock",
@@ -120,13 +175,31 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
         }
       />
 
+      <TableTabs
+        tabs={tabs}
+        active={kind}
+        onChange={(k) => {
+          setKind(k);
+          setCategory(null);
+        }}
+      />
+
       <DataToolbar
         search={search}
         onSearch={setSearch}
+        searchPlaceholder="Filter products"
         density={view === "list" ? density : undefined}
         onDensity={view === "list" ? setDensity : undefined}
         right={<ViewToggle view={view} onChange={setView} />}
       />
+
+      {categories.length > 1 && (
+        <CategoryChips
+          categories={categories}
+          active={category}
+          onChange={setCategory}
+        />
+      )}
 
       {view === "list" ? (
         <DataTable
@@ -143,12 +216,48 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
         <CardGrid rows={rows} onSelect={setCompare} />
       )}
 
-      <CompareDrawer
+      <CompareModal
         row={compare}
         locationId={locationId}
         onClose={() => setCompare(null)}
       />
     </>
+  );
+}
+
+/* Therapeutic classification as chips rather than a select: a buyer
+   scans these, and a closed dropdown hides what is available. */
+function CategoryChips({
+  categories,
+  active,
+  onChange,
+}: {
+  categories: string[];
+  active: string | null;
+  onChange: (c: string | null) => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap gap-1.5">
+      {[null, ...categories].map((c) => {
+        const on = c === active;
+        return (
+          <button
+            key={c ?? "all"}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(c)}
+            className={
+              "rounded-full border px-2.5 py-1 text-help transition-colors " +
+              (on
+                ? "border-brand bg-brand-weak font-semibold text-brand-text"
+                : "border-border text-text-2 hover:bg-hover")
+            }
+          >
+            {c ?? "All categories"}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -226,9 +335,12 @@ function CardGrid({
 
             <div className="px-2.5 pb-2.5 pt-2">
               <p className="truncate text-body font-semibold leading-tight">{row.product_name}</p>
+              {/* Form and strength identify the product; the supplier is
+                  secondary when you are still deciding what to buy. */}
               <p className="truncate text-help text-text-2">
-                {row.uom_name} · {row.vendor_name}
+                {[row.dosage_form, row.brand || row.category_name].filter(Boolean).join(" · ")}
               </p>
+              <p className="truncate text-help text-text-3">{row.vendor_name}</p>
 
               <div className="mt-2 flex items-baseline justify-between">
                 <span className="tabular text-body font-semibold">
@@ -256,7 +368,7 @@ function CardGrid({
 
 /* Vendor comparison: price against expiry, MOQ and lead time. The system
    makes the tradeoff visible; it does not choose. */
-function CompareDrawer({
+function CompareModal({
   row,
   locationId,
   onClose,
@@ -312,7 +424,7 @@ function CompareDrawer({
   const valid = Number.isInteger(count) && count > 0 && Boolean(locationId);
 
   return (
-    <Drawer
+    <Modal
       open
       title={row.product_name}
       subtitle={row.generic_name || row.uom_name}
@@ -376,6 +488,9 @@ function CompareDrawer({
 
       <DetailList
         rows={[
+          ["Category", row.category_name ?? "—"],
+          ["Form", row.dosage_form || "—"],
+          ["Brand", row.brand || "—"],
           ["Supplier", row.vendor_name],
           ["Price", `${CURRENCY.format(row.price)} / ${row.uom_code.toLowerCase()}`],
           ["Minimum order", row.moq.toLocaleString()],
@@ -390,7 +505,7 @@ function CompareDrawer({
       ) : (
         <VendorTable rows={vendors.data ?? []} />
       )}
-    </Drawer>
+    </Modal>
   );
 }
 

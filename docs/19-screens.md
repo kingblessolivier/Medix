@@ -6,7 +6,7 @@ Three templates cover nearly everything:
 
 | Template | Structure | Used by |
 |---|---|---|
-| **List** | Page header → toolbar → DataTable → detail drawer | Products, stock, orders, claims, batches, documents |
+| **List** | Page header → toolbar → DataTable → detail modal | Products, stock, orders, claims, batches, documents |
 | **Transaction** | Document header → tabs → sections → item grid → approval timeline | PO, GRN, invoice, claim, import request |
 | **Console** | Header → status → grouped sections → timeline → activity | Import request, recall, compliance |
 
@@ -156,7 +156,7 @@ Columns: ☐ · Product · Batch · Expiry · Qty · Location · Status. Filters
 
 Expiry rendered as a semantic dot plus text — never colour alone.
 
-**Row click → drawer:** product, batch, stock, expiry, supplier, last movement, `View full history`.
+**Row click → modal:** product, batch, stock, expiry, supplier, last movement, `View full history`.
 
 ---
 
@@ -308,7 +308,7 @@ Variance beyond a configurable threshold requires a reason before closing. This 
 - [ ] No new colour, size, spacing or radius introduced
 - [ ] Lucide icons only, 16–18px, stroke 1.75–2
 - [ ] Uses `DataTable` for any data list
-- [ ] Drawer for inspection; full page only for a genuine workflow
+- [ ] Modal for inspection; full page only for a genuine workflow
 - [ ] Loading, empty and error states all present
 - [ ] Correct in both themes
 - [ ] Keyboard operable, visible focus, accessible names

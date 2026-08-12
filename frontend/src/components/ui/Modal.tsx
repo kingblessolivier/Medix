@@ -1,7 +1,16 @@
-/* Drawer — inspection without losing context.
+/* Modal — inspection without losing context.
  *
- * SEARCH → TABLE → DRAWER → FULL TRANSACTION. A drawer never opens
- * another drawer; if that is needed, the flow belongs on a page.
+ * SEARCH → TABLE → MODAL → FULL TRANSACTION. A modal never opens another
+ * modal; if that is needed, the flow belongs on a page.
+ *
+ * This was a right-hand drawer. It is centred now because a panel pinned
+ * to one edge reads as a sidebar the eye has to travel to, while the row
+ * that opened it sits abandoned on the far side of the screen. Centred,
+ * the detail arrives where the user is already looking.
+ *
+ * Height is capped rather than full-bleed: the body scrolls inside the
+ * panel, so the header and the action never leave the screen no matter
+ * how long the content is.
  *
  * See docs/22-components.md.
  */
@@ -9,13 +18,15 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
-export function Drawer({
+export function Modal({
   open,
   title,
   subtitle,
   onClose,
   footer,
   children,
+  /** Wider for anything carrying a table. */
+  size = "md",
 }: {
   open: boolean;
   title: string;
@@ -23,6 +34,7 @@ export function Drawer({
   onClose: () => void;
   footer?: ReactNode;
   children: ReactNode;
+  size?: "md" | "lg";
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
@@ -33,11 +45,15 @@ export function Drawer({
     restoreTo.current = document.activeElement as HTMLElement;
     panel.current?.focus();
 
+    // The page behind must not scroll under the scrim.
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
       if (event.key !== "Tab" || !panel.current) return;
 
-      // Trap focus: a drawer that lets Tab escape behind the scrim is a
+      // Trap focus: a modal that lets Tab escape behind the scrim is a
       // keyboard dead end.
       const focusable = panel.current.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])',
@@ -57,6 +73,7 @@ export function Drawer({
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
       restoreTo.current?.focus();
     };
   }, [open, onClose]);
@@ -64,19 +81,20 @@ export function Drawer({
   if (!open) return null;
 
   return (
-    <>
-      <div
-        className="fixed inset-0 z-drawer bg-[var(--scrim)]"
-        onClick={onClose}
-        aria-hidden
-      />
+    <div className="fixed inset-0 z-modal flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-[var(--scrim)]" onClick={onClose} aria-hidden />
+
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="fixed right-0 top-0 z-drawer flex h-full w-full max-w-[480px] flex-col bg-surface shadow-e3 outline-none"
+        className={
+          "relative flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl " +
+          "border border-border bg-surface shadow-e3 outline-none " +
+          (size === "lg" ? "max-w-[720px]" : "max-w-[520px]")
+        }
       >
         <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
@@ -97,7 +115,7 @@ export function Drawer({
 
         {footer && <footer className="border-t border-border px-5 py-3">{footer}</footer>}
       </div>
-    </>
+    </div>
   );
 }
 

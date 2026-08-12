@@ -35,11 +35,31 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
     cold_chain = serializers.BooleanField(source="product.cold_chain", read_only=True)
     is_orderable = serializers.BooleanField(read_only=True)
 
+    # Classification. A buyer's first question is "show me the
+    # antibiotics", not "show me everything alphabetically", so the
+    # therapeutic category and the product type travel with every row.
+    category_name = serializers.CharField(
+        source="product.category.name", read_only=True, default=None
+    )
+    product_type_code = serializers.CharField(
+        source="product.product_type.code", read_only=True
+    )
+    brand = serializers.CharField(source="product.brand", read_only=True)
+    dosage_form = serializers.SerializerMethodField()
+
     # Read from the queryset annotation. A declared field with both
     # read_only and a default makes DRF skip the attribute lookup
     # entirely, which silently returned zero stock for every listing.
     stock_base = serializers.SerializerMethodField()
     earliest_expiry = serializers.SerializerMethodField()
+
+    def get_dosage_form(self, listing) -> str:
+        """The base unit is the form — tablet, bottle, vial, pair."""
+        registration = getattr(listing.product, "registration", None)
+        if registration and registration.dosage_form:
+            return registration.dosage_form
+        base = listing.product.units.filter(is_base=True).first()
+        return base.name if base else ""
 
     class Meta:
         model = VendorListing
@@ -48,6 +68,10 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
             "product",
             "product_name",
             "generic_name",
+            "brand",
+            "category_name",
+            "product_type_code",
+            "dosage_form",
             "vendor",
             "vendor_name",
             "availability",

@@ -20,7 +20,7 @@ import {
   StatusPill,
   type Tone,
 } from "@/components/ui";
-import { DetailList, Drawer } from "@/components/ui/Drawer";
+import { DetailList, Modal } from "@/components/ui/Modal";
 
 /** Expiry banding. Status is never colour alone — the dot carries a label. */
 function expiryTone(days: number): { tone: Tone; label: string } {
@@ -150,7 +150,7 @@ export function InventoryScreen() {
         emptyAction={search ? undefined : <Button variant="primary">Receive stock</Button>}
       />
 
-      <BatchDrawer row={selected} onClose={() => setSelected(null)} />
+      <BatchModal row={selected} onClose={() => setSelected(null)} />
     </>
   );
 }
@@ -166,7 +166,7 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: s
   );
 }
 
-function BatchDrawer({ row, onClose }: { row: StockRow | null; onClose: () => void }) {
+function BatchModal({ row, onClose }: { row: StockRow | null; onClose: () => void }) {
   const movements = useQuery({
     queryKey: ["movements", row?.batch],
     queryFn: () => api.movements(`?batch=${row!.batch}`),
@@ -177,7 +177,7 @@ function BatchDrawer({ row, onClose }: { row: StockRow | null; onClose: () => vo
   const { tone, label } = expiryTone(row.days_to_expiry);
 
   return (
-    <Drawer
+    <Modal
       open
       title={row.product_name}
       subtitle={`Batch ${row.batch_number}`}
@@ -203,7 +203,7 @@ function BatchDrawer({ row, onClose }: { row: StockRow | null; onClose: () => vo
       ) : (
         <Ledger movements={movements.data!.results} />
       )}
-    </Drawer>
+    </Modal>
   );
 }
 
