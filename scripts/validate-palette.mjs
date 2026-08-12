@@ -25,6 +25,7 @@ import { dirname, resolve } from "node:path";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TOKENS = resolve(ROOT, "frontend/src/design/tokens.css");
+const TAILWIND = resolve(ROOT, "frontend/tailwind.config.js");
 
 /* ---------- colour maths ------------------------------------------- */
 
@@ -214,6 +215,28 @@ const themes = {
 };
 
 const all = Object.entries(themes).flatMap(([name, tokens]) => check(name, tokens));
+
+/* A correct token nobody can reach is not a correct colour.
+ *
+ * Every colour token has to be bridged into Tailwind or the class that
+ * uses it resolves to nothing and the text quietly inherits --text. That
+ * happened: --ok-text/--warn-text/--bad-text were defined, validated and
+ * used, and none of them ever reached the page. Contrast checks passed
+ * throughout, because they were reading tokens.css rather than what the
+ * components could actually name. */
+const bridged = new Set(
+  [...readFileSync(TAILWIND, "utf8").matchAll(/var\(--([\w-]+)\)/g)].map((m) => m[1]),
+);
+/* Chart series are read straight off the custom property by the charting
+ * layer — an SVG fill, never a Tailwind class — so they need no bridge. */
+const NO_BRIDGE = /^chart-\d+$/;
+
+for (const name of Object.keys(themes.light)) {
+  if (NO_BRIDGE.test(name)) continue;
+  if (!bridged.has(name)) {
+    all.push(`bridge: --${name} is defined in tokens.css but not exposed in tailwind.config.js`);
+  }
+}
 
 if (all.length === 0) {
   const counts = Object.entries(themes)

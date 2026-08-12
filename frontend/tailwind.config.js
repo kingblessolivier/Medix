@@ -32,6 +32,12 @@ export default {
       "ok-bg": "var(--ok-bg)",
       "warn-bg": "var(--warn-bg)",
       "bad-bg": "var(--bad-bg)",
+      // The word ramps. Omitting these once made every `text-ok-text`
+      // silently resolve to nothing and inherit --text instead; the
+      // palette validator now fails when a token here drifts.
+      "ok-text": "var(--ok-text)",
+      "warn-text": "var(--warn-text)",
+      "bad-text": "var(--bad-text)",
     },
     borderRadius: {
       none: "0",
