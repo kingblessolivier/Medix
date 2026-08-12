@@ -11,13 +11,23 @@
  * See docs/19-screens.md §2 and docs/05-modules.md §2.
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { LayoutGrid, List, Snowflake } from "lucide-react";
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { LayoutGrid, List, Plane, Plus, Snowflake } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import { api, type MarketplaceRow, type VendorRow } from "@/lib/api";
+import { ApiFailure, api, type MarketplaceRow, type VendorRow } from "@/lib/api";
 import { DataTable, DataToolbar, type Column, type Density } from "@/components/data/DataTable";
-import { Badge, Button, ErrorState, PageHeader, StatusDot, type Tone } from "@/components/ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  ErrorState,
+  Field,
+  Input,
+  PageHeader,
+  StatusDot,
+  type Tone,
+} from "@/components/ui";
 import { DetailList, Drawer } from "@/components/ui/Drawer";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
@@ -31,7 +41,7 @@ const AVAILABILITY: Record<string, { tone: Tone; label: string }> = {
   NOT_IN_COUNTRY: { tone: "neutral", label: "Not in Rwanda" },
 };
 
-export function MarketplaceScreen() {
+export function MarketplaceScreen({ locationId }: { locationId: string | null }) {
   const [view, setView] = useState<"list" | "grid">("list");
   const [density, setDensity] = useState<Density>("compact");
   const [search, setSearch] = useState("");
@@ -132,7 +142,11 @@ export function MarketplaceScreen() {
         <CardGrid rows={rows} onSelect={setCompare} />
       )}
 
-      <CompareDrawer row={compare} onClose={() => setCompare(null)} />
+      <CompareDrawer
+        row={compare}
+        locationId={locationId}
+        onClose={() => setCompare(null)}
+      />
     </>
   );
 }
@@ -225,7 +239,7 @@ function CardGrid({
               </div>
 
               {row.requires_prescription && (
-                <p className="mt-1 text-help text-warn">Prescription only</p>
+                <p className="mt-1 text-help text-warn-text">Prescription only</p>
               )}
 
               <span className="mt-2 block w-full rounded-sm border border-border py-1 text-center text-help font-semibold">
@@ -243,19 +257,58 @@ function CardGrid({
    makes the tradeoff visible; it does not choose. */
 function CompareDrawer({
   row,
+  locationId,
   onClose,
 }: {
   row: MarketplaceRow | null;
+  locationId: string | null;
   onClose: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const [quantity, setQuantity] = useState("");
+  const [added, setAdded] = useState<{ number: string | null; lines: number } | null>(null);
+  const [failure, setFailure] = useState("");
+
   const vendors = useQuery({
     queryKey: ["compare", row?.product],
     queryFn: () => api.compareVendors(row!.product),
     enabled: Boolean(row),
   });
 
+  // Each product opens on its own minimum, and last product's outcome
+  // must not linger on the next one.
+  useEffect(() => {
+    setQuantity(row ? String(row.moq) : "");
+    setAdded(null);
+    setFailure("");
+  }, [row?.id, row?.moq]);
+
+  const add = useMutation({
+    mutationFn: async () => {
+      const draft = await api.openDraft({
+        supplier: row!.vendor,
+        deliver_to: locationId!,
+      });
+      return api.addOrderLine(draft.id, { listing: row!.id, quantity: Number(quantity) });
+    },
+    onSuccess: (order) => {
+      // An order is numbered when it is submitted, not while it is built.
+      setAdded({ number: order.number || null, lines: order.lines.length });
+      setFailure("");
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+    },
+    // The supplier's rules — minimum, availability — are stated by the
+    // server. Show what it said rather than a generic failure.
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Couldn't add to order.",
+      ),
+  });
+
   if (!row) return null;
   const state = AVAILABILITY[row.availability] ?? AVAILABILITY.NOT_IN_COUNTRY;
+  const count = Number(quantity);
+  const valid = Number.isInteger(count) && count > 0 && Boolean(locationId);
 
   return (
     <Drawer
@@ -264,9 +317,42 @@ function CompareDrawer({
       subtitle={row.generic_name || row.uom_name}
       onClose={onClose}
       footer={
-        <Button variant={row.is_orderable ? "primary" : "secondary"} className="w-full">
-          {row.is_orderable ? "Add to order" : "Request import"}
-        </Button>
+        row.is_orderable ? (
+          <div className="flex items-end gap-2">
+            <div className="w-24">
+              <Field label="Quantity">
+                {(id) => (
+                  <Input
+                    id={id}
+                    type="number"
+                    min={1}
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="tabular text-right"
+                  />
+                )}
+              </Field>
+            </div>
+            <Button
+              variant="primary"
+              className="flex-1"
+              icon={<Plus size={16} strokeWidth={2} />}
+              loading={add.isPending}
+              disabled={!valid}
+              onClick={() => add.mutate()}
+            >
+              Add to order
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="secondary"
+            className="w-full"
+            icon={<Plane size={16} strokeWidth={1.8} />}
+          >
+            Request import
+          </Button>
+        )
       }
     >
       <div className="mb-4 flex flex-wrap gap-2">
@@ -275,12 +361,25 @@ function CompareDrawer({
         {row.cold_chain && <Badge tone="brand">Cold chain</Badge>}
       </div>
 
+      {added && (
+        <Banner tone="ok" className="mb-4">
+          {added.number ? `On order ${added.number}` : "On draft order"} · {added.lines} line
+          {added.lines === 1 ? "" : "s"}
+        </Banner>
+      )}
+      {failure && (
+        <Banner tone="bad" className="mb-4">
+          {failure}
+        </Banner>
+      )}
+
       <DetailList
         rows={[
           ["Supplier", row.vendor_name],
           ["Price", `${CURRENCY.format(row.price)} / ${row.uom_code.toLowerCase()}`],
           ["Minimum order", row.moq.toLocaleString()],
           ["Lead time", `${row.lead_time_days} day${row.lead_time_days === 1 ? "" : "s"}`],
+          ["Order value", CURRENCY.format(row.price * (valid ? count : 0))],
         ]}
       />
 
@@ -294,54 +393,50 @@ function CompareDrawer({
   );
 }
 
+const VENDOR_COLUMNS: Column<VendorRow>[] = [
+  { key: "vendor", header: "Supplier", render: (v) => v.vendor_name },
+  {
+    key: "price",
+    header: "Price",
+    numeric: true,
+    sortable: true,
+    render: (v) => CURRENCY.format(v.price),
+    sortValue: (v) => v.price,
+  },
+  {
+    key: "stock",
+    header: "Stock",
+    numeric: true,
+    sortable: true,
+    render: (v) => v.stock_base.toLocaleString(),
+    sortValue: (v) => v.stock_base,
+  },
+  {
+    key: "expiry",
+    header: "Expiry",
+    sortable: true,
+    // Cheapest with three months left is rarely the right buy, so expiry
+    // sits beside price rather than behind a click.
+    render: (v) => (
+      <span className="text-text-2">
+        {v.earliest_expiry ? MONTH.format(new Date(v.earliest_expiry)) : "—"}
+      </span>
+    ),
+    sortValue: (v) => v.earliest_expiry ?? "",
+  },
+  { key: "moq", header: "MOQ", numeric: true, render: (v) => v.moq },
+  { key: "lead", header: "Days", numeric: true, render: (v) => v.lead_time_days },
+];
+
 function VendorTable({ rows }: { rows: VendorRow[] }) {
-  if (rows.length === 0) return <p className="text-body text-text-2">No suppliers</p>;
-
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="bg-content">
-            <Th>Supplier</Th>
-            <Th numeric>Price</Th>
-            <Th numeric>Stock</Th>
-            <Th>Expiry</Th>
-            <Th numeric>MOQ</Th>
-            <Th numeric>Days</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((v) => (
-            <tr key={v.listing_id} className="border-t border-hair">
-              <td className="px-2 py-1.5 text-body">{v.vendor_name}</td>
-              <td className="tabular px-2 py-1.5 text-right text-body">
-                {CURRENCY.format(v.price)}
-              </td>
-              <td className="tabular px-2 py-1.5 text-right text-body">
-                {v.stock_base.toLocaleString()}
-              </td>
-              <td className="px-2 py-1.5 text-body text-text-2">
-                {v.earliest_expiry ? MONTH.format(new Date(v.earliest_expiry)) : "—"}
-              </td>
-              <td className="tabular px-2 py-1.5 text-right text-body">{v.moq}</td>
-              <td className="tabular px-2 py-1.5 text-right text-body">{v.lead_time_days}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Th({ children, numeric }: { children: React.ReactNode; numeric?: boolean }) {
-  return (
-    <th
-      className={
-        "px-2 py-1.5 text-label font-semibold text-text-2 " +
-        (numeric ? "text-right" : "text-left")
-      }
-    >
-      {children}
-    </th>
+    <DataTable
+      columns={VENDOR_COLUMNS}
+      rows={rows}
+      rowKey={(v) => v.listing_id}
+      density="compact"
+      caption="Suppliers offering this product"
+      emptyHeading="No suppliers"
+    />
   );
 }

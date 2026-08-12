@@ -6,6 +6,13 @@
  */
 
 import clsx from "clsx";
+import {
+  CircleAlert,
+  CircleCheck,
+  Info,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import { useId } from "react";
 
@@ -14,7 +21,7 @@ import { useId } from "react";
 type ButtonVariant = "primary" | "secondary" | "tertiary" | "danger";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-brand text-white border border-transparent hover:opacity-90",
+  primary: "bg-brand text-on-brand border border-transparent hover:opacity-90",
   secondary: "bg-surface text-text border border-border hover:bg-hover",
   tertiary: "bg-transparent text-text-2 border border-transparent hover:bg-hover",
   danger: "bg-bad text-white border border-transparent hover:opacity-90",
@@ -84,11 +91,11 @@ export function Field({
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-label font-medium text-text-2">
         {label}
-        {required && <span className="ml-0.5 text-bad">*</span>}
+        {required && <span className="ml-0.5 text-bad-text">*</span>}
       </label>
       {children(id)}
       {error ? (
-        <p className="text-help text-bad">{error}</p>
+        <p className="text-help text-bad-text">{error}</p>
       ) : help ? (
         <p className="text-help text-text-3">{help}</p>
       ) : null}
@@ -96,9 +103,11 @@ export function Field({
   );
 }
 
+/* The control edge uses --border-control, not the divider colour: it is
+ * the only thing telling you where the field is, so it owes 3:1. */
 const CONTROL =
   "h-9 w-full rounded-md border bg-surface px-3 text-body text-text " +
-  "placeholder:text-text-3 transition-colors hover:border-text-3 " +
+  "placeholder:text-text-3 transition-colors hover:border-text-2 " +
   "focus:border-brand disabled:cursor-not-allowed disabled:bg-content disabled:text-text-3";
 
 export function Input({
@@ -108,7 +117,7 @@ export function Input({
 }: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
   return (
     <input
-      className={clsx(CONTROL, invalid ? "border-bad" : "border-border", className)}
+      className={clsx(CONTROL, invalid ? "border-bad" : "border-control", className)}
       aria-invalid={invalid || undefined}
       {...rest}
     />
@@ -123,7 +132,12 @@ export function Select({
 }: SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean }) {
   return (
     <select
-      className={clsx(CONTROL, "cursor-pointer", invalid ? "border-bad" : "border-border", className)}
+      className={clsx(
+        CONTROL,
+        "cursor-pointer",
+        invalid ? "border-bad" : "border-control",
+        className,
+      )}
       aria-invalid={invalid || undefined}
       {...rest}
     >
@@ -136,7 +150,7 @@ export function Select({
 
 /* Status is never colour alone. The dot always carries its label. */
 
-export type Tone = "ok" | "warn" | "bad" | "neutral" | "brand";
+export type Tone = "ok" | "warn" | "bad" | "neutral" | "brand" | "info";
 
 const DOT: Record<Tone, string> = {
   ok: "bg-ok",
@@ -144,14 +158,18 @@ const DOT: Record<Tone, string> = {
   bad: "bg-bad",
   neutral: "bg-text-3",
   brand: "bg-brand",
+  info: "bg-info",
 };
 
+/* The dot is a mark and may sit at 3:1; the word beside it is text and
+ * owes 4.5:1. Same status, two ramps — see tokens.css. */
 const TEXT: Record<Tone, string> = {
-  ok: "text-ok",
-  warn: "text-warn",
-  bad: "text-bad",
+  ok: "text-ok-text",
+  warn: "text-warn-text",
+  bad: "text-bad-text",
   neutral: "text-text-2",
-  brand: "text-brand",
+  brand: "text-brand-text",
+  info: "text-info-text",
 };
 
 export function StatusDot({ tone, children }: { tone: Tone; children: ReactNode }) {
@@ -164,11 +182,12 @@ export function StatusDot({ tone, children }: { tone: Tone; children: ReactNode 
 }
 
 const BADGE: Record<Tone, string> = {
-  ok: "bg-ok-bg text-ok",
-  warn: "bg-warn-bg text-warn",
-  bad: "bg-bad-bg text-bad",
+  ok: "bg-ok-bg text-ok-text",
+  warn: "bg-warn-bg text-warn-text",
+  bad: "bg-bad-bg text-bad-text",
   neutral: "bg-hover text-text-2",
   brand: "bg-brand-weak text-brand-text",
+  info: "bg-info-bg text-info-text",
 };
 
 export function Badge({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
@@ -181,6 +200,53 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
     >
       {children}
     </span>
+  );
+}
+
+/* -- Banner ------------------------------------------------------------ */
+
+/* An inline result, tied to the thing it is about. Never a floating toast
+ * for anything the user must act on.
+ *
+ * Colour is never the only signal — each tone carries its own icon, so
+ * the message survives a monochrome screen and colour-vision deficiency.
+ * One line of copy, 12 words. See docs/23-ui-copy.md. */
+
+const BANNER: Record<Tone, { box: string; mark: string; icon: LucideIcon }> = {
+  ok: { box: "border-ok bg-ok-bg", mark: "text-ok", icon: CircleCheck },
+  warn: { box: "border-warn bg-warn-bg", mark: "text-warn", icon: TriangleAlert },
+  bad: { box: "border-bad bg-bad-bg", mark: "text-bad", icon: CircleAlert },
+  brand: { box: "border-brand bg-brand-weak", mark: "text-brand-text", icon: Info },
+  info: { box: "border-info bg-info-bg", mark: "text-info-text", icon: Info },
+  neutral: { box: "border-border bg-content", mark: "text-text-3", icon: Info },
+};
+
+/* Outer spacing belongs to whoever places it, not to the banner. */
+export function Banner({
+  tone = "neutral",
+  children,
+  action,
+  className,
+}: {
+  tone?: Tone;
+  children: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  const { box, mark, icon: Icon } = BANNER[tone];
+  return (
+    <div
+      role={tone === "bad" ? "alert" : "status"}
+      className={clsx(
+        "flex items-center gap-2.5 rounded-md border px-3 py-2",
+        box,
+        className,
+      )}
+    >
+      <Icon size={16} strokeWidth={1.9} className={clsx("shrink-0", mark)} aria-hidden />
+      <p className="min-w-0 flex-1 text-body text-text">{children}</p>
+      {action}
+    </div>
   );
 }
 
@@ -241,6 +307,7 @@ export function EmptyState({
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+      <CircleAlert size={20} strokeWidth={1.75} className="text-bad" aria-hidden />
       <p className="text-body text-text">{message}</p>
       {onRetry && (
         <Button onClick={onRetry} variant="secondary">

@@ -118,9 +118,9 @@ export function InventoryScreen() {
       {/* Borderless, one hairline beneath. Never cards. */}
       <div className="mb-4 flex flex-wrap gap-8 border-b border-hair pb-4">
         <Metric label="Batches" value={stock.data?.count ?? 0} />
-        <Metric label="Critical" value={bands.critical} tone="text-bad" />
-        <Metric label="Expiring" value={bands.expiring} tone="text-warn" />
-        <Metric label="Healthy" value={bands.healthy} tone="text-ok" />
+        <Metric label="Critical" value={bands.critical} tone="text-bad-text" />
+        <Metric label="Expiring" value={bands.expiring} tone="text-warn-text" />
+        <Metric label="Healthy" value={bands.healthy} tone="text-ok-text" />
       </div>
 
       <DataToolbar

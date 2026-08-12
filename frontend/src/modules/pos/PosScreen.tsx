@@ -17,7 +17,7 @@ import { Loader2, ScanBarcode, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiFailure, api, type ProductRow, type Sale, type SaleLine } from "@/lib/api";
-import { Button, EmptyState, PageHeader, StatusDot } from "@/components/ui";
+import { Banner, Button, EmptyState, PageHeader, StatusDot } from "@/components/ui";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
 
@@ -167,7 +167,7 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
             <div className="flex items-start gap-2 border-l-2 border-bad bg-bad-bg px-3 py-2.5">
               <ShieldAlert size={16} strokeWidth={1.8} className="mt-0.5 shrink-0 text-bad" />
               <div>
-                <p className="text-body font-medium text-bad">{blocked}</p>
+                <p className="text-body font-medium text-bad-text">{blocked}</p>
                 <button type="button" className="mt-1 text-help text-brand underline">
                   Attach prescription
                 </button>
@@ -176,9 +176,7 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
           )}
 
           {failure && (
-            <p role="alert" className="border-l-2 border-bad bg-bad-bg px-3 py-2 text-body text-bad">
-              {failure.error.message}
-            </p>
+            <Banner tone="bad">{failure.error.message}</Banner>
           )}
 
           <div className="rounded-lg border border-border bg-surface p-4">
@@ -239,7 +237,7 @@ function Line({ line }: { line: SaleLine }) {
           {/* The batch is shown because FEFO chose it, not the operator. */}
           <span className="font-mono">{line.batch_number}</span>
           {line.requires_prescription && (
-            <span className="ml-2 text-warn">Prescription only</span>
+            <span className="ml-2 text-warn-text">Prescription only</span>
           )}
         </p>
       </div>
@@ -277,7 +275,7 @@ function PaymentPanel({
            handset and the money is not in the drawer yet. */
         <div className="flex items-center gap-2 border-l-2 border-warn bg-warn-bg px-3 py-2.5">
           <Loader2 size={15} strokeWidth={1.8} className="animate-spin text-warn" />
-          <span className="text-body text-warn">Awaiting confirmation</span>
+          <span className="text-body text-warn-text">Awaiting confirmation</span>
         </div>
       )}
       {(["CASH", "MOBILE_MONEY", "INSURANCE"] as const).map((method) => (

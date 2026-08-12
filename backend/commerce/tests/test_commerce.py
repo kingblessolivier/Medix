@@ -267,6 +267,63 @@ class TestOrders:
         with pytest.raises(services.CustomerNotVerified):
             services.submit_order(order=order, performed_by=market["buyer"])
 
+    def test_draft_is_reused_per_supplier(self, market):
+        """Adding from the marketplace twice builds one order, not two."""
+        first = services.open_draft(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+        second = services.open_draft(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+        assert first.id == second.id
+
+    def test_submitted_order_does_not_become_the_draft(self, market):
+        """A new draft opens once the last one is on its way."""
+        listing = self._listing(market)
+        self._verified(market)
+        sent = services.open_draft(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+        services.add_order_line(order=sent, listing=listing, quantity=10)
+        services.submit_order(order=sent, performed_by=market["buyer"])
+
+        fresh = services.open_draft(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+        assert fresh.id != sent.id
+        assert fresh.status == PurchaseOrderStatus.DRAFT
+
+    def test_adding_same_product_twice_merges(self, market):
+        """Two adds of one product are more of it, not two lines to pick."""
+        listing = self._listing(market)
+        order = services.start_order(
+            organization=market["retail"],
+            supplier=market["wholesale"],
+            deliver_to=market["store"],
+            performed_by=market["buyer"],
+        )
+        services.add_order_line(order=order, listing=listing, quantity=10)
+        services.add_order_line(order=order, listing=listing, quantity=5)
+
+        order.refresh_from_db()
+        assert order.lines.count() == 1
+        line = order.lines.get()
+        assert line.quantity == 15
+        assert line.line_total == 15 * listing.price
+        assert order.subtotal == 15 * listing.price
+
     def test_below_minimum_refused(self, market):
         listing = self._listing(market, moq=10)
         order = services.start_order(
@@ -519,4 +576,93 @@ class TestReceiving:
         assert quarantined.quantity_base == 400
         assert (
             inventory.balance_for(organization=market["retail"], product=cold_product) == 0
+        )
+
+
+class TestCatalogMirroring:
+    """Receiving crosses a tenant boundary.
+
+    A purchase order line points at the supplier's catalog row, but the
+    buyer's ledger keys to the buyer's own. Getting this wrong either 404s
+    on receipt or — far worse — silently stores a quantity against the
+    wrong unit chain.
+    """
+
+    def test_mirror_copies_unit_chain_exactly(self, market):
+        from catalog import services as catalog
+
+        source = market["product"]
+        mirrored = catalog.mirror_product(
+            organization=market["retail"], source=source, performed_by=market["buyer"]
+        )
+
+        assert mirrored.organization_id == market["retail"].id
+        assert mirrored.id != source.id
+
+        # Factor for factor: a pack meaning 100 there and 12 here would
+        # corrupt every received quantity rather than fail.
+        assert {u.code: u.factor_to_base for u in mirrored.units.all()} == {
+            u.code: u.factor_to_base for u in source.units.all()
+        }
+        assert mirrored.units.get(is_base=True).code == source.units.get(is_base=True).code
+
+    def test_mirror_carries_legal_status(self, market):
+        """A prescription-only medicine must not become over-the-counter."""
+        from catalog import services as catalog
+
+        mirrored = catalog.mirror_product(
+            organization=market["retail"], source=market["product"], performed_by=market["buyer"]
+        )
+        assert mirrored.legal_status == market["product"].legal_status
+        assert mirrored.requires_prescription is True
+
+    def test_mirror_is_idempotent_on_gtin(self, market):
+        """Receiving the same product twice must not fork the catalog."""
+        from catalog import services as catalog
+
+        source = market["product"]
+        source.gtin = "05012345678900"
+        source.save(update_fields=["gtin"])
+
+        first = catalog.mirror_product(
+            organization=market["retail"], source=source, performed_by=market["buyer"]
+        )
+        second = catalog.mirror_product(
+            organization=market["retail"], source=source, performed_by=market["buyer"]
+        )
+        assert first.id == second.id
+
+    def test_mirror_matches_on_registration_number(self, market):
+        """Registration is the national identity — it wins over spelling."""
+        from catalog import services as catalog
+        from catalog.models import ProductRegistration
+
+        source = market["product"]
+        ProductRegistration.objects.create(
+            organization=market["wholesale"],
+            product=source,
+            registration_number="RW-MED-4417",
+        )
+        # The buyer already stocks it, spelled differently.
+        theirs = make_product(market["retail"], "Amoxil 500 mg caps")
+        ProductRegistration.objects.create(
+            organization=market["retail"],
+            product=theirs,
+            registration_number="RW-MED-4417",
+        )
+
+        mirrored = catalog.mirror_product(
+            organization=market["retail"], source=source, performed_by=market["buyer"]
+        )
+        assert mirrored.id == theirs.id
+
+    def test_own_product_is_returned_untouched(self, market):
+        from catalog import services as catalog
+
+        own = make_product(market["retail"], "Paracetamol 500mg")
+        assert (
+            catalog.mirror_product(
+                organization=market["retail"], source=own, performed_by=market["buyer"]
+            ).id
+            == own.id
         )

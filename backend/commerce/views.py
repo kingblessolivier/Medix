@@ -17,6 +17,7 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from catalog import services as catalog_services
 from catalog.models import Product, UnitOfMeasure
 from commerce import services
 from commerce.models import (
@@ -224,6 +225,28 @@ class PurchaseOrderViewSet(
         )
         return Response(PurchaseOrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=["post"])
+    def draft(self, request):
+        """The open draft for a supplier, opened if there isn't one.
+
+        Backs 'Add to order' in the marketplace: the buyer picks products
+        across several visits to the catalogue and they land on one order.
+        """
+        payload = StartOrderSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        supplier = get_object_or_404(Organization.objects.all(), pk=data["supplier"])
+        deliver_to = get_object_or_404(Location.tenant_objects, pk=data["deliver_to"])
+
+        order = services.open_draft(
+            organization=request.user.organization,
+            supplier=supplier,
+            deliver_to=deliver_to,
+            performed_by=request.user,
+        )
+        return Response(PurchaseOrderSerializer(order).data)
+
     @action(detail=True, methods=["post"], url_path="lines")
     def add_line(self, request, pk=None):
         order = self.get_object()
@@ -325,12 +348,26 @@ class GoodsReceiptViewSet(
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
 
-        product = get_object_or_404(Product.tenant_objects, pk=data["product"])
         order_line = (
             get_object_or_404(PurchaseOrderLine.objects.all(), pk=data["order_line"])
             if data.get("order_line")
             else None
         )
+
+        # An order line points at the *supplier's* catalog row, so the id
+        # sent here may be a product this pharmacy has never held. Receive
+        # into our own row, mirroring the supplier's if we have none.
+        product = Product.tenant_objects.filter(pk=data["product"]).first()
+        if product is None:
+            source = get_object_or_404(
+                Product.objects.select_related("product_type", "registration"),
+                pk=data["product"],
+            )
+            product = catalog_services.mirror_product(
+                organization=request.user.organization,
+                source=source,
+                performed_by=request.user,
+            )
 
         services.add_receipt_line(
             receipt=receipt,

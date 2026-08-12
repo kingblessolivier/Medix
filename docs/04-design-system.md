@@ -28,20 +28,11 @@ Defined once in `src/design/tokens.css` and bridged into Tailwind. **Never write
 | `--content` | `#F8FAFC` | `#1A1F24` | Secondary areas, table headers |
 | `--surface` | `#FFFFFF` | `#1E242A` | Important content |
 | `--hover` | `#EEF2F6` | `#252C33` | Interaction, quiet search field |
-| `--selected` | `#E8F1FF` | `#12314C` | Active navigation |
+| `--selected` | `#E8F5E9` | `#16301F` | Active navigation |
 
 Depth comes from barely perceptible differences between neutrals, not from putting every section in a floating card. The user never thinks *there are four backgrounds*; they feel the interface has structure.
 
 Floating objects — modal, dropdown, command palette — sit on `--surface` plus a shadow. That is the fifth level. Do not invent a sixth.
-
-### Borders — two, deliberately
-
-| Token | Light | Dark | Used for |
-|---|---|---|---|
-| `--border` | `#DCE2E8` | `#2B333A` | Structural: panels, inputs, table outline, shell edges |
-| `--border-hair` | `#E4E8EC` | `#242B31` | Hairline: table rows, list separators |
-
-Collapsing these into one is why tables turn into grids of boxes. At 1440p the hairline should almost disappear.
 
 ### Text
 
@@ -49,18 +40,62 @@ Collapsing these into one is why tables turn into grids of boxes. At 1440p the h
 |---|---|---|
 | `--text` | `#17212B` | `#E6EBEF` |
 | `--text-2` | `#5F6B76` | `#96A2AC` |
-| `--text-3` | `#8A959E` | `#6E7A84` |
+| `--text-3` | `#868F98` | `#6E7A84` |
 
 ### Brand and semantic
 
+The brand is the **Material green ramp** — 800 for fills, 900 for words, 50 for tints. Green because the pharmacy cross in Rwanda is green; blue reads as banking here.
+
 | Token | Light | Dark | Meaning |
 |---|---|---|---|
-| `--brand` | `#0078D4` | `#4CA6E8` | Actions, active state, links |
+| `--brand` | `#2E7D32` | `#A5D6A7` | Fills: primary button, active nav, focus ring |
+| `--brand-text` | `#1B5E20` | `#A5D6A7` | Brand-coloured *words* and links |
+| `--on-brand` | `#FFFFFF` | `#10241A` | The label sitting on a brand fill |
+| `--info` | `#0F5A9C` | `#8CC6F0` | Acknowledged, in progress, confirmed |
 | `--ok` | `#059669` | `#34C88A` | Available, approved, received, completed |
 | `--warn` | `#D97706` | `#DFA23A` | Expiring, pending, low stock, awaiting approval |
 | `--bad` | `#DC2626` | `#EA6E66` | Expired, rejected, critical, recalled |
 
-Blue is an **accent**, never the environment. There is no giant blue background anywhere in Medix. Semantic colour means *status* and never decoration — never colour a whole table row, use a `●` dot or a small badge.
+Green is an **accent**, never the environment. There is no giant green background anywhere in Medix. Semantic colour means *status* and never decoration — never colour a whole table row, use a `●` dot or a small badge.
+
+#### Three rules the validator enforces
+
+**1. A mark is not a word.** `--ok` is the 8px dot, the icon, the rule; it may sit at 3:1. `--ok-text` is the sentence beside it and owes 4.5:1, on `--surface` *and* on its own tint. Painting copy in the mark colour is the failure this split prevents — `#059669` on `#E7F5EF` is 3.36:1, which fails AA outright.
+
+| Token | Light | Dark |
+|---|---|---|
+| `--ok-text` | `#047857` | `#34C88A` |
+| `--warn-text` | `#92400E` | `#DFA23A` |
+| `--bad-text` | `#B91C1C` | `#EA6E66` |
+| `--info-text` | `#0F5A9C` | `#8CC6F0` |
+
+On a dark ground the mark colours already clear 4.5:1 on their own tints, so word and mark coincide there. In light they cannot.
+
+**2. A brand fill does not assume white text.** In dark the brand is a pale green where white gives 1.6:1. Use `--on-brand`, never `text-white`, on a brand surface.
+
+**3. Two colours that mean different things must not read as the same colour.** The brand is green and so is success, and both appear in the same status column — so `--brand` is held ΔE ≥ 12 from `--ok`, and "Confirmed" uses `--info` (blue) rather than the brand, so no status column ever shows two greens meaning two things.
+
+### Borders — two for structure, one for controls
+
+| Token | Light | Dark | Used for |
+|---|---|---|---|
+| `--border` | `#DCE2E8` | `#2B333A` | Structural: panels, table outline, shell edges |
+| `--border-hair` | `#E4E8EC` | `#242B31` | Hairline: table rows, list separators |
+| `--border-control` | `#848D95` | `#66727C` | Input and select edges |
+
+Collapsing the first two into one is why tables turn into grids of boxes. At 1440p the hairline should almost disappear.
+
+The third is not a style choice. Dividers may be faint — WCAG 1.4.11 exempts decoration, and a row rule at 3:1 would compete with the data it separates. The edge of an input is not decoration: it is the only thing telling you where the field is, so it owes 3:1. `--border` sits at 1.31:1 on white, which is right for a divider and wrong for a control.
+
+### Running the validator
+
+Colour here is computed, not judged by eye:
+
+```bash
+node scripts/validate-palette.mjs
+```
+
+It reads both themes out of `tokens.css` and checks 31 pairs per theme — text at 4.5:1, large text and marks at 3:1, the chart series against the ground and against each other under normal vision plus all three dichromacies, and the "means different things" separations above. Run it before changing any value; a failure prints the exact pair and ratio.
 
 ### Elevation
 
@@ -317,7 +352,7 @@ ATTENTION
 
 ## Themes
 
-Both light and dark are first-class. Dark is not an inversion — it uses its own Fluent-style neutral ramp, and the brand lifts to `#4CA6E8` because `#0078D4` dies on a dark ground.
+Both light and dark are first-class. Dark is not an inversion — it uses its own Fluent-style neutral ramp, and the brand lifts to `#A5D6A7` because `#2E7D32` dies on a dark ground — which is also why `--on-brand` goes dark there.
 
 Implementation is token-level: define the palette on `:root`, redefine tokens under `@media (prefers-color-scheme: dark)`, then again under `:root[data-theme="dark"]` and `:root[data-theme="light"]` so an explicit toggle wins in both directions. Style components through tokens only.
 

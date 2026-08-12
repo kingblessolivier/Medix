@@ -290,6 +290,80 @@ export type VendorRow = {
   lead_time_days: number;
 };
 
+export type OrderLine = {
+  id: string;
+  product: string;
+  product_name: string;
+  uom_code: string;
+  quantity: number;
+  quantity_base: number;
+  unit_price: number;
+  line_total: number;
+  received_base: number;
+  outstanding_base: number;
+};
+
+export type PurchaseOrder = {
+  id: string;
+  number: string;
+  status: string;
+  supplier: string;
+  supplier_name: string;
+  buyer_name: string;
+  deliver_to_name: string;
+  required_by: string | null;
+  subtotal: number;
+  currency: string;
+  submitted_at: string | null;
+  confirmed_at: string | null;
+  created_at: string;
+  lines: OrderLine[];
+};
+
+export type ReceiptLine = {
+  id: string;
+  product: string;
+  product_name: string;
+  uom_code: string;
+  ordered: number;
+  received: number;
+  accepted: number;
+  rejected: number;
+  rejection_reason: string;
+  is_short: boolean;
+  batch_number: string;
+  expiry_date: string;
+  unit_cost_base: number;
+  gtin: string;
+};
+
+export type GoodsReceipt = {
+  id: string;
+  number: string;
+  status: string;
+  order: string | null;
+  supplier: string | null;
+  supplier_name: string | null;
+  location: string;
+  location_name: string;
+  received_on: string;
+  posted_at: string | null;
+  transport_temperature_ok: boolean;
+  has_discrepancy: boolean;
+  lines: ReceiptLine[];
+};
+
+/** What differed from the order — the reason the document exists. */
+export type Discrepancy = {
+  product: string;
+  ordered: number;
+  received: number;
+  accepted: number;
+  rejected: number;
+  short_by: number;
+  reason: string;
+};
+
 /** Derived from held licences — decides which navigation to show. */
 export type Capabilities = {
   capabilities: string[];
@@ -331,4 +405,43 @@ export const api = {
     request<Paginated<MarketplaceRow>>(`/marketplace/${params}`),
   compareVendors: (product: string) =>
     request<VendorRow[]>(`/marketplace/compare/?product=${product}`),
+
+  orders: () => request<Paginated<PurchaseOrder>>("/purchase-orders/"),
+  order: (id: string) => request<PurchaseOrder>(`/purchase-orders/${id}/`),
+  fulfilment: () => request<Paginated<PurchaseOrder>>("/purchase-orders/fulfilment/"),
+  startOrder: (body: { supplier: string; deliver_to: string }) =>
+    request<PurchaseOrder>("/purchase-orders/", { method: "POST", body }),
+  /* The open draft for this supplier, opened if there isn't one — so
+     adding from the marketplace builds one order, not one per click. */
+  openDraft: (body: { supplier: string; deliver_to: string }) =>
+    request<PurchaseOrder>("/purchase-orders/draft/", { method: "POST", body }),
+  addOrderLine: (id: string, body: { listing: string; quantity: number }) =>
+    request<PurchaseOrder>(`/purchase-orders/${id}/lines/`, { method: "POST", body }),
+  submitOrder: (id: string) =>
+    request<PurchaseOrder>(`/purchase-orders/${id}/submit/`, { method: "POST", body: {} }),
+  confirmOrder: (id: string) =>
+    request<PurchaseOrder>(`/purchase-orders/${id}/confirm/`, { method: "POST", body: {} }),
+
+  receipts: () => request<Paginated<GoodsReceipt>>("/goods-receipts/"),
+  startReceipt: (body: { location: string; order?: string; supplier?: string }) =>
+    request<GoodsReceipt>("/goods-receipts/", { method: "POST", body }),
+  addReceiptLine: (
+    id: string,
+    body: {
+      product: string;
+      uom_code: string;
+      received: number;
+      accepted?: number;
+      rejected?: number;
+      rejection_reason?: string;
+      batch_number: string;
+      expiry_date: string;
+      unit_cost_base?: number;
+      order_line?: string;
+    },
+  ) => request<GoodsReceipt>(`/goods-receipts/${id}/lines/`, { method: "POST", body }),
+  postReceipt: (id: string) =>
+    request<GoodsReceipt>(`/goods-receipts/${id}/post_receipt/`, { method: "POST", body: {} }),
+  discrepancies: (id: string) =>
+    request<Discrepancy[]>(`/goods-receipts/${id}/discrepancies/`),
 };

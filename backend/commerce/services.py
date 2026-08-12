@@ -167,6 +167,40 @@ def start_order(
     )
 
 
+def open_draft(
+    *,
+    organization: Organization,
+    supplier: Organization,
+    deliver_to: Location,
+    performed_by: User,
+) -> PurchaseOrder:
+    """The draft this pharmacy is currently building for one supplier.
+
+    Adding a product from the marketplace must not open a new order per
+    click. One draft per supplier and delivery point is the unit a buyer
+    thinks in: everything ordered from that vendor this morning is one
+    purchase order, and the vendor gets one document to pick.
+    """
+    existing = (
+        PurchaseOrder.objects.filter(
+            organization=organization,
+            supplier=supplier,
+            deliver_to=deliver_to,
+            status=PurchaseOrderStatus.DRAFT,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if existing is not None:
+        return existing
+    return start_order(
+        organization=organization,
+        supplier=supplier,
+        deliver_to=deliver_to,
+        performed_by=performed_by,
+    )
+
+
 @transaction.atomic
 def add_order_line(
     *, order: PurchaseOrder, listing: VendorListing, quantity: int
@@ -183,21 +217,38 @@ def add_order_line(
             "Raise an import request instead.",
             meta={"availability": listing.availability},
         )
-    if quantity < listing.moq:
+    # Adding the same product twice means "more of it", not a second line
+    # the vendor has to reconcile. Price is part of the match: if the
+    # listing has repriced since the first add, that is a distinct line.
+    line = order.lines.filter(
+        product=listing.product, uom=listing.price_uom, unit_price=listing.price
+    ).first()
+
+    # The minimum applies to the line the supplier ends up picking, not to
+    # each click. Topping a line of 10 up by 5 leaves 15, which clears a
+    # minimum of 10 — refusing that would be arithmetic, not policy.
+    resulting = (line.quantity if line is not None else 0) + quantity
+    if resulting < listing.moq:
         raise BelowMinimum(
             f"Minimum order is {listing.moq} {listing.price_uom.code.lower()}.",
-            meta={"moq": listing.moq, "requested": quantity},
+            meta={"moq": listing.moq, "requested": resulting},
         )
 
-    line = PurchaseOrderLine.objects.create(
-        order=order,
-        product=listing.product,
-        uom=listing.price_uom,
-        quantity=quantity,
-        quantity_base=Quantity(quantity, listing.price_uom).base_value,
-        unit_price=listing.price,
-        line_total=listing.price * quantity,
-    )
+    if line is not None:
+        line.quantity = resulting
+        line.quantity_base = Quantity(resulting, listing.price_uom).base_value
+        line.line_total = listing.price * resulting
+        line.save(update_fields=["quantity", "quantity_base", "line_total"])
+    else:
+        line = PurchaseOrderLine.objects.create(
+            order=order,
+            product=listing.product,
+            uom=listing.price_uom,
+            quantity=quantity,
+            quantity_base=Quantity(quantity, listing.price_uom).base_value,
+            unit_price=listing.price,
+            line_total=listing.price * quantity,
+        )
     _recalculate_order(order)
     return line
 

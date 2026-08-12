@@ -71,7 +71,7 @@ export function LoginScreen({ onSignedIn }: { onSignedIn: () => void }) {
           </Field>
 
           {error && (
-            <p role="alert" className="text-help text-bad">
+            <p role="alert" className="text-help text-bad-text">
               {error}
             </p>
           )}

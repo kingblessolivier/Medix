@@ -1,16 +1,18 @@
-/* Application root: auth gate, shell, module routing. */
+/* Application root: auth gate, capability-driven shell, module routing. */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { AppShell } from "@/components/navigation/AppShell";
+import { AppShell, navigationFor } from "@/components/navigation/AppShell";
 import { EmptyState } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { api, logout, tokens } from "@/lib/api";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
 import { MarketplaceScreen } from "@/modules/marketplace/MarketplaceScreen";
+import { OrdersScreen } from "@/modules/orders/OrdersScreen";
 import { PosScreen } from "@/modules/pos/PosScreen";
+import { ReceivingScreen } from "@/modules/receiving/ReceivingScreen";
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -22,6 +24,14 @@ export default function App() {
     queryFn: () => api.me(),
     enabled: signedIn,
     retry: false,
+  });
+
+  // Navigation follows held licences: a wholesale pharmacy has no point
+  // of sale, a retail pharmacy no fulfilment queue. See ADR-006.
+  const capabilities = useQuery({
+    queryKey: ["capabilities"],
+    queryFn: () => api.capabilities(),
+    enabled: signedIn,
   });
 
   const locations = useQuery({
@@ -49,8 +59,13 @@ export default function App() {
     return <LoginScreen onSignedIn={() => setSignedIn(true)} />;
   }
 
+  const granted = capabilities.data?.capabilities ?? [];
+  const canSell = granted.includes("SELL_RETAIL");
+  const canSupply = granted.includes("SELL_WHOLESALE");
+
   return (
     <AppShell
+      groups={navigationFor(granted)}
       active={active}
       onNavigate={setActive}
       organizationName={me.data?.organization?.name}
@@ -66,10 +81,14 @@ export default function App() {
       <ErrorBoundary key={active}>
         {active === "inventory" ? (
           <InventoryScreen />
-        ) : active === "pos" ? (
+        ) : active === "pos" && canSell ? (
           <PosScreen locationId={mainLocation ?? null} />
         ) : active === "marketplace" ? (
-          <MarketplaceScreen />
+          <MarketplaceScreen locationId={mainLocation ?? null} />
+        ) : active === "orders" ? (
+          <OrdersScreen canSupply={canSupply} />
+        ) : active === "receiving" ? (
+          <ReceivingScreen locationId={mainLocation ?? null} />
         ) : (
           <EmptyState
             heading="Not built yet"

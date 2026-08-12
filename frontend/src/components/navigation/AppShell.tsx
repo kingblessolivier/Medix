@@ -11,15 +11,18 @@ import {
   ArrowLeftRight,
   Bell,
   ChartNoAxesCombined,
+  ClipboardList,
   LayoutDashboard,
   Moon,
   Package,
+  PackageCheck,
   Receipt,
   Search,
   Settings,
   ShoppingCart,
   Store,
   Sun,
+  Truck,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -27,7 +30,49 @@ import { useEffect, useState, type ReactNode } from "react";
 export type NavItem = { id: string; label: string; icon: LucideIcon };
 export type NavGroup = { label: string; items: NavItem[] };
 
-/* One icon per concept, everywhere. Lucide only, 17px, stroke 1.8. */
+/* Navigation is derived from held licences, not a role name. A wholesale
+   pharmacy has no point of sale; a retail pharmacy no fulfilment queue.
+   An organization holding both licences sees both, with no special case.
+   See ADR-006. */
+export function navigationFor(capabilities: string[]): NavGroup[] {
+  const can = (c: string) => capabilities.includes(c);
+
+  const operations: NavItem[] = [{ id: "inventory", label: "Inventory", icon: Package }];
+  if (can("SELL_RETAIL")) {
+    operations.push({ id: "pos", label: "Point of sale", icon: Receipt });
+  }
+  operations.push({ id: "transfers", label: "Transfers", icon: ArrowLeftRight });
+  if (can("DISTRIBUTE")) {
+    operations.push({ id: "distribution", label: "Distribution", icon: Truck });
+  }
+
+  const commerce: NavItem[] = [
+    { id: "marketplace", label: "Marketplace", icon: Store },
+    { id: "orders", label: "Orders", icon: ShoppingCart },
+    { id: "receiving", label: "Receiving", icon: PackageCheck },
+  ];
+
+  const groups: NavGroup[] = [
+    { label: "Main", items: [{ id: "overview", label: "Overview", icon: LayoutDashboard }] },
+    { label: "Operations", items: operations },
+    { label: "Commerce", items: commerce },
+  ];
+
+  if (can("DISPENSE")) {
+    groups.push({
+      label: "Patients",
+      items: [{ id: "prescriptions", label: "Prescriptions", icon: ClipboardList }],
+    });
+  }
+
+  groups.push({
+    label: "Reporting",
+    items: [{ id: "analytics", label: "Analytics", icon: ChartNoAxesCombined }],
+  });
+  return groups;
+}
+
+/* Fallback used before capabilities load. */
 export const PHARMACY_NAV: NavGroup[] = [
   { label: "Main", items: [{ id: "overview", label: "Overview", icon: LayoutDashboard }] },
   {
