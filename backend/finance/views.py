@@ -22,7 +22,12 @@ from inventory.models import Batch, Location
 
 
 class ExpenseCategoryViewSet(
-    mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
 ):
     serializer_class = ExpenseCategorySerializer
 
@@ -37,11 +42,23 @@ class ExpenseCategoryViewSet(
             services.seed_categories(request.user.organization)
         return super().list(request, *args, **kwargs)
 
+    def perform_destroy(self, instance):
+        """Deactivated, not deleted.
+
+        Expenses point at the category with PROTECT, and a category last
+        quarter's costs were filed under must stay nameable in last
+        quarter's report.
+        """
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "modified_at"])
+
 
 class ExpenseViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
     mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     serializer_class = ExpenseSerializer
