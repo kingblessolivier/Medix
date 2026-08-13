@@ -809,3 +809,97 @@ Also fixed from the previous pass: the batch trace reported
 tracing every unit to its current location or its sale; a total reads
 identically whether the stock is on one shelf or in four branches, and
 nobody can be sent to fetch a total.
+
+
+---
+
+## Stage 15 — The lists you could not add to
+
+Prompted by one question — *the catalogue has no button to add a
+product?* — which turned out to be a class rather than an oversight. A
+`ModelViewSet` serves create, update and destroy; if no screen ever POSTs
+to it the record can be read and never made.
+
+**A product could not be created.** `ProductWriteSerializer` and the
+create path have existed since Phase 1. The editor could change a
+product's packaging, images and registration and could not add one, so a
+new pharmacy's catalogue was empty and stayed empty. The base unit is
+created with it, because a product without one cannot be received,
+priced, sold or counted — creating the product alone produces a row that
+looks complete and fails at the first movement.
+
+**A depot could offer nothing.** `ListingViewSet` has full CRUD,
+`publish_listing()` is tested in six files, `/listings/{id}/tiers` sets
+volume pricing — and no screen called any of it. The marketplace only had
+rows because `seed_market` put them there, which is the whole depot half
+of the business model with no entry point. Worse, `PublishListingSerializer`
+had no `offered` field at all, so every listing created through the API
+was published with nothing behind it: exactly the "shows Available,
+refuses at the server" state seven of the sixty seeded rows were in.
+
+**A pharmacy could not add a room, and a probe could not be registered** —
+so the cold-chain screen listed nothing on every deployment.
+
+**Every sale belonged to no day.** The point of sale started each sale
+with a location and no till, so the server never resolved a shift and
+`sale.shift` was always null. Day end would have reported zero however
+much was sold, and the cash-variance control never ran. Not a missing
+screen — a link that was not being captured, which no amount of building
+the screen later recovers.
+
+### Two bugs the work itself produced
+
+**Enum drift, twice.** `RETAIL_PHARMACY` where the stored value is
+`RETAIL`; `FRIDGE` for a location kind that has only `BRANCH` and
+`STORE`. Both were written by reading the Python attribute name instead
+of its value, both typecheck perfectly, and both surface as a form that
+fills in correctly and is rejected on submit. `core/tests/test_enums.py`
+now reads the frontend's literals back and fails when they drift — and
+caught two more (`GSL`, `ZERO_RATED`) on its first run.
+
+**A duplicate code returned 500.** Every tenant-scoped record with a code
+is unique on `(organization, code)`; the organization is injected in
+`perform_create()`, so it is not in the serializer's data, so DRF's
+`UniqueTogetherValidator` never fires. The database caught it and the
+`IntegrityError` reached the user as *Something went wrong. Try again.*
+Fixed once in `core/exceptions.py` rather than by adding a validator to
+thirty serializers.
+
+### The order tracker
+
+The order drawer showed a history — what had happened. The question
+people open an order to ask is *where is it*, and that needs the steps
+**not** yet reached as much as the ones that are: three completed events
+look identical whether the next move is tomorrow's delivery or a depot
+that has not accepted it. `OrderTracker` shows the whole route
+vertically, each done step carrying its time, actor and document.
+
+Vertical because the labels are sentences. Laid out horizontally,
+"Awaiting confirmation" either truncates or forces every column to the
+width of the longest one.
+
+The usual shipment tracker paints the steps ahead in red. Not here — red
+is reserved for status, and a step that has not happened yet is not a
+fault. Done is green, the current step is the brand colour, what is ahead
+is quiet, and the one genuinely red state is an order sent back or
+cancelled.
+
+
+### Documents could not be opened at all
+
+`window.open("/api/v1/documents/<id>/pdf/")` is a plain navigation. The
+JWT lives in localStorage and is attached by `request()`; a navigation
+carries no headers, so the API answered 401 and the tab showed a JSON
+error where a delivery note should have been. Proved by calling the
+endpoint both ways: 401 without the token, 200 with it.
+
+Both the HTML and the PDF are fetched with the token now, and the
+document is shown **in the app** rather than thrown at a new tab — a
+pharmacist checking a delivery note against what arrived wants it beside
+the order, not in a window they have to find their way back from. The
+preview renders the stored HTML, which is the same bytes the PDF was
+rendered from, so it is the document rather than an approximation of it.
+
+The frame is sandboxed with scripts blocked. A document is the one place
+product and patient text reaches a browser as markup — Django escapes
+every value, and the sandbox is the second lock rather than the first.

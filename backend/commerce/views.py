@@ -198,15 +198,23 @@ class ListingViewSet(
         data = payload.validated_data
 
         product = get_object_or_404(Product.tenant_objects, pk=data["product"])
+        price_uom = _resolve_uom(product, data["uom_code"])
+
+        # Given in the unit the depot prices in; the ledger and the
+        # allocation check both work in base units.
+        offered = data.get("offered")
+        offered_base = None if offered is None else offered * price_uom.factor_to_base
+
         listing = services.publish_listing(
             organization=request.user.organization,
             product=product,
             price=data["price"],
-            price_uom=_resolve_uom(product, data["uom_code"]),
+            price_uom=price_uom,
             availability=data.get("availability", Availability.AVAILABLE_NOW),
             moq=data.get("moq", 1),
             lead_time_days=data.get("lead_time_days", 1),
             srp=data.get("srp"),
+            offered_base=offered_base,
             performed_by=request.user,
         )
         return Response(

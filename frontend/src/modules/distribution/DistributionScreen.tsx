@@ -31,7 +31,7 @@ import {
 } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
 import { AlertStack } from "@/components/ui/AlertStack";
-import { OrderTimeline } from "@/modules/orders/OrderTimeline";
+import { OrderTracker } from "@/modules/orders/OrderTracker";
 import {
   ApiFailure,
   api,
@@ -341,9 +341,10 @@ function FulfilmentModal({
         emptyHeading="No items"
       />
 
-      <h3 className="mb-3 mt-6 text-section font-semibold">History</h3>
-      <OrderTimeline
+      <h3 className="mb-3 mt-6 text-section font-semibold">Where it is</h3>
+      <OrderTracker
         events={order.events ?? []}
+        status={order.status}
         viewerOrganization={viewerOrganization}
       />
     </Modal>

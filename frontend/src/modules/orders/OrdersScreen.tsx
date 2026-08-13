@@ -42,7 +42,7 @@ import {
 import { DetailList, Modal } from "@/components/ui/Modal";
 import { AlertStack } from "@/components/ui/AlertStack";
 import { Consequence, NextAction } from "@/components/ui/Guidance";
-import { OrderTimeline } from "./OrderTimeline";
+import { OrderTracker } from "./OrderTracker";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
 const DAY = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" });
@@ -740,9 +740,10 @@ function OrderModal({
         emptyHeading="No items"
       />
 
-      <h3 className="mb-3 mt-6 text-section font-semibold">History</h3>
-      <OrderTimeline
+      <h3 className="mb-3 mt-6 text-section font-semibold">Where it is</h3>
+      <OrderTracker
         events={order.events ?? []}
+        status={order.status}
         viewerOrganization={viewerOrganization}
       />
     </Modal>

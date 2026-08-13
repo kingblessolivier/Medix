@@ -10,6 +10,7 @@ import clsx from "clsx";
 import {
   ArrowLeftRight,
   BookOpen,
+  Calculator,
   Building2,
   ChartNoAxesCombined,
   ClipboardList,
@@ -25,6 +26,7 @@ import {
   Settings,
   ShoppingCart,
   Store,
+  Tag,
   ShieldCheck,
   Sparkles,
   Snowflake,
@@ -55,6 +57,9 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   ];
   if (can("SELL_RETAIL")) {
     operations.push({ id: "pos", label: "Point of sale", icon: Receipt });
+    // The counter and the drawer are one job. A till with no shift open
+    // records sales that belong to no day.
+    operations.push({ id: "dayend", label: "Day end", icon: Calculator });
   }
   operations.push({ id: "transfers", label: "Transfers", icon: ArrowLeftRight });
   operations.push({ id: "returns", label: "Returns", icon: Undo2 });
@@ -65,6 +70,8 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   // DISTRIBUTE: if you can offer stock you have orders to pick.
   if (can("PUBLISH_LISTINGS")) {
     operations.push({ id: "distribution", label: "Orders to fill", icon: Truck });
+    // Without this a depot can receive a container and offer none of it.
+    operations.push({ id: "listings", label: "On offer", icon: Tag });
   }
 
   const commerce: NavItem[] = [

@@ -31,6 +31,7 @@ import {
   Field,
   Input,
   PageHeader,
+  Select,
   Skeleton,
   StatusPill,
   type Tone,
@@ -72,6 +73,7 @@ const VIEWS: { id: string; label: string; open?: boolean }[] = [
 export function ColdChainScreen() {
   const [view, setView] = useState("unresolved");
   const [selected, setSelected] = useState<Excursion | null>(null);
+  const [registering, setRegistering] = useState(false);
 
   const excursions = useQuery({
     queryKey: ["excursions"],
@@ -149,6 +151,11 @@ export function ColdChainScreen() {
       <PageHeader
         title="Cold chain"
         description="Fridges, faults and the stock they held"
+        actions={
+          <Button variant="secondary" onClick={() => setRegistering(true)}>
+            Add probe
+          </Button>
+        }
       />
 
       {stillOpen.length > 0 ? (
@@ -168,7 +175,19 @@ export function ColdChainScreen() {
         />
       ) : null}
 
-      <Probes sensors={sensors.data?.results ?? []} />
+      {(sensors.data?.results ?? []).length === 0 ? (
+        <NextAction
+          heading="Register a probe"
+          detail="Nothing is being watched until one reports."
+          action={
+            <Button variant="primary" onClick={() => setRegistering(true)}>
+              Add probe
+            </Button>
+          }
+        />
+      ) : (
+        <Probes sensors={sensors.data?.results ?? []} />
+      )}
 
       <TableTabs tabs={tabs} active={view} onChange={setView} />
       <DataTable
@@ -183,7 +202,148 @@ export function ColdChainScreen() {
       />
 
       <ExcursionModal excursion={selected} onClose={() => setSelected(null)} />
+      {registering && <ProbeModal onClose={() => setRegistering(false)} />}
     </>
+  );
+}
+
+/* Registering the probe, which nothing could do.
+ *
+ * The device code is the identity the agent reports, not the probe's
+ * serial: replacing a failed probe in the same fridge should continue
+ * that fridge's history rather than start a new one. */
+function ProbeModal({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [location, setLocation] = useState("");
+  const [deviceCode, setDeviceCode] = useState("");
+  const [name, setName] = useState("");
+  const [minimum, setMinimum] = useState("2");
+  const [maximum, setMaximum] = useState("8");
+  const [failure, setFailure] = useState("");
+
+  const locations = useQuery({ queryKey: ["locations"], queryFn: () => api.locations() });
+
+  useEffect(() => {
+    const cold = (locations.data?.results ?? []).find(
+      (l) => l.temperature_class?.startsWith("COLD") || l.temperature_class === "FROZEN",
+    );
+    const first = cold ?? locations.data?.results?.[0];
+    if (first && !location) setLocation(first.id);
+  }, [locations.data, location]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveSensor({
+        location,
+        device_code: deviceCode,
+        name,
+        minimum_c: minimum,
+        maximum_c: maximum,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sensors"] });
+      onClose();
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not saved."),
+  });
+
+  return (
+    <Modal
+      open
+      title="Add probe"
+      onClose={onClose}
+      footer={
+        <Button
+          variant="primary"
+          className="w-full"
+          disabled={!location || !deviceCode.trim()}
+          loading={save.isPending}
+          onClick={() => save.mutate()}
+        >
+          Add probe
+        </Button>
+      }
+    >
+      <Consequence
+        lines={[
+          "Readings from this code are recorded against that fridge.",
+          "A sustained fault holds the cold-chain stock inside it.",
+        ]}
+      />
+      {failure && (
+        <Banner tone="bad" className="mt-3">
+          {failure}
+        </Banner>
+      )}
+      <div className="mt-4 flex flex-col gap-4">
+        <Field label="Fridge" required>
+          {(id) => (
+            <Select
+              id={id}
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+            >
+              {(locations.data?.results ?? []).map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Field
+          label={
+            (
+              <Help term="Device code">
+                What the agent reports for this probe. Replacing a failed probe
+                with the same code continues the fridge's history.
+              </Help>
+            ) as unknown as string
+          }
+          required
+        >
+          {(id) => (
+            <Input
+              id={id}
+              value={deviceCode}
+              onChange={(e) => setDeviceCode(e.target.value)}
+              placeholder="FRIDGE-1"
+              className="font-mono"
+            />
+          )}
+        </Field>
+        <Field label="Name">
+          {(id) => (
+            <Input id={id} value={name} onChange={(e) => setName(e.target.value)} />
+          )}
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Minimum" help="Degrees Celsius.">
+            {(id) => (
+              <Input
+                id={id}
+                type="number"
+                value={minimum}
+                onChange={(e) => setMinimum(e.target.value)}
+                className="tabular text-right"
+              />
+            )}
+          </Field>
+          <Field label="Maximum">
+            {(id) => (
+              <Input
+                id={id}
+                type="number"
+                value={maximum}
+                onChange={(e) => setMaximum(e.target.value)}
+                className="tabular text-right"
+              />
+            )}
+          </Field>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

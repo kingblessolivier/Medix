@@ -161,6 +161,10 @@ class ProductWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
+            # Returned so a client can chain off the create. Without it a
+            # caller has no way to attach the base unit the product needs
+            # before it can take a single movement.
+            "id",
             "name",
             "generic_name",
             "brand",
@@ -174,6 +178,7 @@ class ProductWriteSerializer(serializers.ModelSerializer):
             "gtin",
             "is_active",
         ]
+        read_only_fields = ["id"]
 
     def validate(self, data: dict) -> dict:
         product_type = data.get("product_type") or getattr(self.instance, "product_type", None)

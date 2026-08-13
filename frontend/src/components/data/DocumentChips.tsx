@@ -13,12 +13,12 @@
  * table without opening anything.
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { Download, ExternalLink, FileText } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Download, FileText, Printer } from "lucide-react";
 
-import { Badge, Button } from "@/components/ui";
+import { Badge, Banner, Button, Skeleton } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
-import { api, type MedixDocument } from "@/lib/api";
+import { ApiFailure, api, type MedixDocument } from "@/lib/api";
 import { useState } from "react";
 
 const WHEN = new Intl.DateTimeFormat("en-GB", {
@@ -159,9 +159,45 @@ function DocumentDetail({
   document: MedixDocument;
   onClose: () => void;
 }) {
+  const [failure, setFailure] = useState("");
+
+  /* The stored HTML — the same bytes the PDF was rendered from, so this
+     is the document rather than an approximation of it. docs/18 treats a
+     divergence between preview and print as a bug, not a variation. */
+  const preview = useQuery({
+    queryKey: ["document-html", doc.id],
+    queryFn: () => api.documentHtml(doc.id),
+  });
+
+  const download = useMutation({
+    mutationFn: () => api.documentPdf(doc.id),
+    onSuccess: (blob) => {
+      // A blob URL, because the request needed a header a plain link
+      // cannot carry. Revoked once the browser has taken it.
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = `${doc.number}-v${doc.version}.pdf`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    },
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Could not download it.",
+      ),
+  });
+
+  function print() {
+    const frame = window.document.getElementById(
+      `document-${doc.id}`,
+    ) as HTMLIFrameElement | null;
+    frame?.contentWindow?.print();
+  }
+
   return (
     <Modal
       open
+      size="lg"
       title={doc.number}
       subtitle={doc.kind_label}
       onClose={onClose}
@@ -170,16 +206,18 @@ function DocumentDetail({
           <Button
             variant="primary"
             className="flex-1"
-            icon={<ExternalLink size={16} strokeWidth={1.9} aria-hidden />}
-            onClick={() => window.open(api.documentPreviewUrl(doc.id), "_blank")}
+            icon={<Printer size={16} strokeWidth={1.9} aria-hidden />}
+            disabled={!preview.data}
+            onClick={print}
           >
-            Open
+            Print
           </Button>
           {doc.has_pdf && (
             <Button
               variant="secondary"
               icon={<Download size={16} strokeWidth={1.9} aria-hidden />}
-              onClick={() => window.open(api.documentPdfUrl(doc.id), "_blank")}
+              loading={download.isPending}
+              onClick={() => download.mutate()}
             >
               PDF
             </Button>
@@ -203,8 +241,37 @@ function DocumentDetail({
         </p>
       )}
 
+      {failure && (
+        <Banner tone="bad" className="mt-4">
+          {failure}
+        </Banner>
+      )}
+
+      <div className="mt-4 overflow-hidden rounded-md border border-border bg-white">
+        {preview.isPending ? (
+          <Skeleton className="h-[420px]" />
+        ) : preview.isError ? (
+          <div className="p-4">
+            <Banner tone="bad">Could not load the document.</Banner>
+          </div>
+        ) : (
+          /* Sandboxed: the content is our own rendered template and
+             Django escapes every value in it, but a document is still
+             the one place product and patient text reaches a browser as
+             markup. Scripts are blocked; same-origin is allowed so the
+             print button can reach the frame. */
+          <iframe
+            id={`document-${doc.id}`}
+            title={`${doc.kind_label} ${doc.number}`}
+            srcDoc={preview.data}
+            sandbox="allow-same-origin"
+            className="h-[420px] w-full border-0"
+          />
+        )}
+      </div>
+
       {!doc.has_pdf && (
-        <p className="mt-4 flex items-start gap-2 text-help text-text-2">
+        <p className="mt-3 flex items-start gap-2 text-help text-text-2">
           <FileText size={14} strokeWidth={1.9} className="mt-0.5 shrink-0" aria-hidden />
           Rendered as HTML. PDF output is not configured on this deployment.
         </p>

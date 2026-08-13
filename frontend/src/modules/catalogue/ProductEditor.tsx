@@ -13,7 +13,7 @@
  * what was typed.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImagePlus, Plus, Search } from "lucide-react";
 import {
@@ -26,6 +26,7 @@ import {
   Badge,
   Banner,
   Button,
+  Checkbox,
   Field,
   Input,
   PageHeader,
@@ -33,6 +34,7 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { Modal } from "@/components/ui/Modal";
+import { Help } from "@/components/ui/Guidance";
 import {
   ApiFailure,
   api,
@@ -59,6 +61,7 @@ const TABS: TableTab[] = [
 export function ProductEditor() {
   const [search, setSearch] = useState("");
   const [chosen, setChosen] = useState<ProductRow | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const products = useQuery({
     queryKey: ["products", search],
@@ -91,7 +94,19 @@ export function ProductEditor() {
 
   return (
     <>
-      <PageHeader title="Catalogue" description="What each product carries." />
+      <PageHeader
+        title="Catalogue"
+        description="What each product carries."
+        actions={
+          <Button
+            variant="primary"
+            icon={<Plus size={15} strokeWidth={2} aria-hidden />}
+            onClick={() => setAdding(true)}
+          >
+            Add product
+          </Button>
+        }
+      />
 
       <div className="mb-3 max-w-md">
         <Field label="Find a product">
@@ -115,10 +130,254 @@ export function ProductEditor() {
         onRowClick={setChosen}
         caption="Products"
         emptyHeading="No products"
+        emptyBody="Nothing can be received or sold until one exists."
+        emptyAction={
+          <Button variant="primary" onClick={() => setAdding(true)}>
+            Add product
+          </Button>
+        }
       />
 
       <ProductModal product={chosen} onClose={() => setChosen(null)} />
+      {adding && <NewProductModal onClose={() => setAdding(false)} />}
     </>
+  );
+}
+
+/* Stored values, from LegalStatus and TaxTreatment in
+   backend/catalog/models.py. `core/tests/test_enums.py` fails if these
+   drift — it caught "GSL" and "ZERO_RATED", neither of which exists. */
+const LEGAL = [
+  ["OTC", "Over the counter"],
+  ["POM", "Prescription only"],
+  ["CONTROLLED", "Controlled"],
+] as const;
+
+/* Exempt is not zero-rated: input VAT on an exempt supply cannot be
+   reclaimed, which changes the true cost of goods and the margin. */
+const TAX = [
+  ["EXEMPT", "Exempt"],
+  ["STANDARD", "Standard rate"],
+  ["ZERO", "Zero rated"],
+] as const;
+
+/* Creating a product and its base unit in one step.
+ *
+ * They are one step because a product without a base unit cannot be
+ * received, priced, sold or counted — every quantity in Medix is carried
+ * in base units. Creating the product alone produces a row that looks
+ * complete and fails at the first movement, which is a worse outcome
+ * than a slightly longer form. */
+function NewProductModal({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [generic, setGeneric] = useState("");
+  const [brand, setBrand] = useState("");
+  const [type, setType] = useState("");
+  const [category, setCategory] = useState("");
+  const [legal, setLegal] = useState<string>("OTC");
+  const [schedule, setSchedule] = useState("");
+  const [tax, setTax] = useState<string>("EXEMPT");
+  const [coldChain, setColdChain] = useState(false);
+  const [gtin, setGtin] = useState("");
+  const [baseUnit, setBaseUnit] = useState("Tablet");
+  const [failure, setFailure] = useState("");
+
+  const types = useQuery({ queryKey: ["product-types"], queryFn: () => api.productTypes() });
+  const categories = useQuery({ queryKey: ["categories"], queryFn: () => api.categories() });
+
+  useEffect(() => {
+    const first = types.data?.results?.[0];
+    if (first && !type) setType(first.id);
+  }, [types.data, type]);
+
+  const create = useMutation({
+    mutationFn: async () => {
+      const product = await api.saveProduct({
+        name,
+        generic_name: generic,
+        brand,
+        product_type: type,
+        category: category || null,
+        legal_status: legal,
+        controlled_schedule: legal === "CONTROLLED" ? schedule : "",
+        tax_treatment: tax,
+        cold_chain: coldChain,
+        gtin,
+        is_active: true,
+      });
+      // Every quantity is carried in this unit. Without it the product
+      // cannot take a movement at all.
+      await api.saveUnit({
+        product: product.id,
+        code: baseUnit.trim().toUpperCase().slice(0, 20),
+        name: baseUnit.trim(),
+        factor_to_base: 1,
+        is_base: true,
+        is_sellable: true,
+        is_dispense_default: true,
+      });
+      return product;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      onClose();
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not created."),
+  });
+
+  const ready = name.trim() && type && baseUnit.trim();
+
+  return (
+    <Modal
+      open
+      title="Add product"
+      onClose={onClose}
+      footer={
+        <Button
+          variant="primary"
+          className="w-full"
+          disabled={!ready}
+          loading={create.isPending}
+          onClick={() => create.mutate()}
+        >
+          Add product
+        </Button>
+      }
+    >
+      {failure && (
+        <Banner tone="bad" className="mb-4">
+          {failure}
+        </Banner>
+      )}
+
+      <div className="flex flex-col gap-4">
+        <Field label="Name" help="As it appears on the pack." required>
+          {(id) => (
+            <Input id={id} value={name} onChange={(e) => setName(e.target.value)} />
+          )}
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Generic name">
+            {(id) => (
+              <Input
+                id={id}
+                value={generic}
+                onChange={(e) => setGeneric(e.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Brand">
+            {(id) => (
+              <Input id={id} value={brand} onChange={(e) => setBrand(e.target.value)} />
+            )}
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Type" required>
+            {(id) => (
+              <Select id={id} value={type} onChange={(e) => setType(e.target.value)}>
+                {(types.data?.results ?? []).map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Category">
+            {(id) => (
+              <Select
+                id={id}
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+              >
+                <option value="">None</option>
+                {(categories.data?.results ?? []).map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        </div>
+
+        <Field
+          label={
+            (
+              <Help term="Base unit">
+                The smallest thing you count. Every quantity in Medix is stored in
+                this unit — packs and cartons are multiples of it.
+              </Help>
+            ) as unknown as string
+          }
+          help="Tablet, capsule, bottle, piece."
+          required
+        >
+          {(id) => (
+            <Input
+              id={id}
+              value={baseUnit}
+              onChange={(e) => setBaseUnit(e.target.value)}
+            />
+          )}
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Legal status" required>
+            {(id) => (
+              <Select id={id} value={legal} onChange={(e) => setLegal(e.target.value)}>
+                {LEGAL.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Tax">
+            {(id) => (
+              <Select id={id} value={tax} onChange={(e) => setTax(e.target.value)}>
+                {TAX.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        </div>
+
+        {legal === "CONTROLLED" && (
+          <Field label="Schedule" help="Every sale writes a register entry." required>
+            {(id) => (
+              <Input
+                id={id}
+                value={schedule}
+                onChange={(e) => setSchedule(e.target.value)}
+                placeholder="I"
+              />
+            )}
+          </Field>
+        )}
+
+        <Field label="Barcode" help="GTIN on the pack, if it has one.">
+          {(id) => (
+            <Input id={id} value={gtin} onChange={(e) => setGtin(e.target.value)} />
+          )}
+        </Field>
+
+        <Checkbox
+          checked={coldChain}
+          onChange={setColdChain}
+          label="Needs a fridge"
+        />
+      </div>
+    </Modal>
   );
 }
 

@@ -132,6 +132,41 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return payload as T;
 }
 
+/** A document's own bytes — HTML or PDF, never JSON.
+ *
+ * Separate from `request` because that helper parses every response as
+ * JSON and would mangle both. Retries once through the refresh flow for
+ * the same reason `request` does: a preview opened on a stale token
+ * should not read as a missing document.
+ */
+async function fetchDocument(path: string, as: "text"): Promise<string>;
+async function fetchDocument(path: string, as: "blob"): Promise<Blob>;
+async function fetchDocument(path: string, as: "text" | "blob"): Promise<string | Blob> {
+  const send = () => {
+    const headers: Record<string, string> = {};
+    const access = tokens.access;
+    if (access) headers.Authorization = `Bearer ${access}`;
+    return fetch(`${BASE}${path}`, { headers });
+  };
+
+  let response = await send();
+  if (response.status === 401 && tokens.refresh) {
+    if (await refreshAccess()) response = await send();
+  }
+
+  if (!response.ok) {
+    throw new ApiFailure(response.status, {
+      code: response.status === 404 ? "not_rendered" : "unavailable",
+      message:
+        response.status === 404
+          ? "This document has no PDF on this deployment."
+          : "Could not open the document.",
+    });
+  }
+
+  return as === "text" ? response.text() : response.blob();
+}
+
 export async function login(username: string, password: string): Promise<void> {
   const response = await fetch(`${BASE}/auth/token/`, {
     method: "POST",
@@ -221,6 +256,12 @@ export type ProductRow = {
   base_uom_name: string;
 };
 
+export type ProductType = {
+  id: string;
+  code: string;
+  name: string;
+};
+
 export type UnitOfMeasureRow = {
   id: string;
   code: string;
@@ -277,7 +318,15 @@ export type Sale = {
   payments: SalePayment[];
 };
 
-export type Location = { id: string; name: string; code: string };
+export type Location = {
+  id: string;
+  name: string;
+  code: string;
+  kind?: string;
+  /** AMBIENT, COLD, FROZEN. What may be stored here at all. */
+  temperature_class?: string;
+  is_cold_capable?: boolean;
+};
 
 /** A level the depot will sell at, with the price restated for it. */
 export type SellableUnit = {
@@ -491,6 +540,43 @@ export type BatchTrace = {
   dispensed_base: number;
   dispatched_base: number;
   on_hand_base: number;
+};
+
+/* -- tills, shifts and day end ------------------------------------------ */
+
+export type Till = {
+  id: string;
+  name: string;
+  code: string;
+  branch: string;
+  is_active: boolean;
+};
+
+export type Shift = {
+  id: string;
+  till: string;
+  till_name: string;
+  status: string;
+  opening_float: number;
+  counted_cash: number | null;
+  variance: number | null;
+  opened_at: string;
+  closed_at: string | null;
+};
+
+/** The X report while open, the Z report once closed. */
+export type DayEnd = {
+  sales_total: number;
+  transactions: number;
+  items_sold: number;
+  discounts: number;
+  tax_total: number;
+  /** Settled money only. A pending request-to-pay is not in the till. */
+  by_method: Record<string, number>;
+  expected_cash: number;
+  counted_cash: number | null;
+  variance: number | null;
+  pending_payments: number;
 };
 
 /* -- licences and registrations ----------------------------------------- */
@@ -1083,8 +1169,13 @@ export const api = {
 
   sales: () => request<Paginated<Sale>>("/sales/"),
   sale: (id: string) => request<Sale>(`/sales/${id}/`),
-  startSale: (location: string) =>
-    request<Sale>("/sales/", { method: "POST", body: { location } }),
+  /* The till matters: the server resolves the open shift from it, and a
+     sale started without one belongs to no day. */
+  startSale: (location: string, till?: string | null) =>
+    request<Sale>("/sales/", {
+      method: "POST",
+      body: till ? { location, till } : { location },
+    }),
   addLine: (
     id: string,
     line: { product: string; quantity: number; uom_code: string; unit_price: number },
@@ -1207,8 +1298,11 @@ export const api = {
   documentsAbout: (transactionId: string) =>
     request<Paginated<MedixDocument>>(`/documents/?related=${transactionId}`),
   /** The stored HTML, not a re-render — preview and print cannot diverge. */
-  documentPreviewUrl: (id: string) => `${BASE}/documents/${id}/preview/`,
-  documentPdfUrl: (id: string) => `${BASE}/documents/${id}/pdf/`,
+  /* Fetched with the token rather than navigated to. A plain
+     `window.open` carries no Authorization header, so the API answered
+     401 and the tab showed a JSON error instead of the document. */
+  documentHtml: (id: string) => fetchDocument(`/documents/${id}/preview/`, "text"),
+  documentPdf: (id: string) => fetchDocument(`/documents/${id}/pdf/`, "blob"),
 
   /* -- finance --------------------------------------------------------- */
 
@@ -1307,6 +1401,16 @@ export const api = {
     request<Paginated<ProductRegistration>>(
       `/product-registrations/?product=${productId}`,
     ),
+  /* Creating and editing the product itself, which nothing could do.
+     A base unit is created alongside it — a product without one cannot
+     be received, priced, sold or counted. */
+  saveProduct: (body: Record<string, unknown>, id?: string) =>
+    request<ProductRow>(id ? `/products/${id}/` : "/products/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+  productTypes: () => request<Paginated<ProductType>>("/product-types/"),
+
   saveProductRegistration: (body: Record<string, unknown>) =>
     request<ProductRegistration>("/product-registrations/", { method: "POST", body }),
 
@@ -1387,6 +1491,52 @@ export const api = {
   /* A licence is issued to a branch, not to an organization. */
   branches: () => request<Paginated<Branch>>("/branches/"),
 
+  /* -- a depot's own listings --------------------------------------------
+
+     `offered` is an allocation out of the depot's own stock, in the unit
+     it prices in — not a view of the stock. A depot holding 500 packs
+     may offer 200 and keep the rest for its branches. */
+  myListings: () => request<Paginated<MarketplaceRow>>("/listings/"),
+  publishListing: (body: {
+    product: string;
+    price: number;
+    uom_code: string;
+    offered?: number;
+    moq?: number;
+    lead_time_days?: number;
+    srp?: number | null;
+    availability?: string;
+  }) => request<MarketplaceRow>("/listings/", { method: "POST", body }),
+  /* Withdrawn, not deleted: the row leaves the marketplace and stays as
+     the record that the offer was once made. */
+  withdrawListing: (id: string) =>
+    request<void>(`/listings/${id}/`, { method: "DELETE" }),
+  setPriceTiers: (id: string, tiers: { min_quantity: number; price: number }[]) =>
+    request<MarketplaceRow>(`/listings/${id}/tiers/`, {
+      method: "POST",
+      body: { tiers },
+    }),
+
+  /* -- tills, shifts and day end -----------------------------------------
+
+     A sale belongs to the shift that was open on its till. Without one
+     the sale is still recorded, but it belongs to no day, and day end
+     has nothing to reconcile. */
+  tills: () => request<Paginated<Till>>("/tills/"),
+  saveTill: (body: { name: string; code: string; branch: string }) =>
+    request<Till>("/tills/", { method: "POST", body }),
+  shifts: () => request<Paginated<Shift>>("/shifts/"),
+  openShift: (till: string, openingFloat: number) =>
+    request<Shift>("/shifts/", {
+      method: "POST",
+      body: { till, opening_float: openingFloat },
+    }),
+  xReport: (shift: string) => request<DayEnd>(`/shifts/${shift}/x-report/`),
+  closeShift: (
+    shift: string,
+    body: { counted_cash: number; variance_reason?: string; allow_pending?: boolean },
+  ) => request<DayEnd>(`/shifts/${shift}/close/`, { method: "POST", body }),
+
   /* -- the Assistant -----------------------------------------------------
 
      `ask` reads and can suggest; it has no path to a service that
@@ -1407,6 +1557,26 @@ export const api = {
      alert in the system that acts rather than warns. That also makes it
      the one a pharmacist most needs to see: stock has gone unsellable
      and something has to say why, and let somebody decide about it. */
+  /* A pharmacy gets whatever onboarding created and could add nothing:
+     no cold room, no back store, no second counter. */
+  saveLocation: (body: {
+    name: string;
+    code: string;
+    kind: string;
+    temperature_class: string;
+    branch?: string | null;
+  }) => request<Location>("/locations/", { method: "POST", body }),
+
+  /* Without this the cold-chain screen lists nothing on every
+     deployment — a probe could not be registered at all. */
+  saveSensor: (body: {
+    location: string;
+    device_code: string;
+    name: string;
+    minimum_c: string;
+    maximum_c: string;
+  }) => request<Sensor>("/sensors/", { method: "POST", body }),
+
   excursions: (openOnly = false) =>
     request<Paginated<Excursion>>(
       `/excursions/${openOnly ? "?open=true" : ""}`,
