@@ -203,6 +203,12 @@ class PublishListingSerializer(serializers.Serializer):
     lead_time_days = serializers.IntegerField(min_value=0, default=1)
     srp = serializers.IntegerField(min_value=0, required=False, allow_null=True)
 
+    #: How much of its own stock this depot is putting on the market, in
+    #: `uom_code` — the unit it prices in, because that is the unit a
+    #: wholesaler thinks in. Omitted leaves the existing allocation alone,
+    #: so repricing does not silently withdraw the offer.
+    offered = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+
 
 class SetPriceTiersSerializer(serializers.Serializer):
     """Volume breaks, replacing whatever the listing had.

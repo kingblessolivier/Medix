@@ -51,8 +51,14 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
     enabled: query.trim().length >= 2,
   });
 
+  /* Which till this browser is standing at, and the shift open on it.
+     A sale started without a till belongs to no day: the server resolves
+     the shift from the till, and day end reads sales through the shift. */
+  const shifts = useQuery({ queryKey: ["shifts"], queryFn: () => api.shifts() });
+  const openShift = (shifts.data?.results ?? []).find((s) => s.status === "OPEN");
+
   const start = useMutation({
-    mutationFn: () => api.startSale(locationId!),
+    mutationFn: () => api.startSale(locationId!, openShift?.till ?? null),
     onSuccess: (created) => setSaleId(created.id),
   });
 
@@ -110,10 +116,12 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
   // double-invokes effects and would otherwise open two draft sales.
   const starting = useRef(false);
   useEffect(() => {
-    if (!locationId || saleId || starting.current) return;
+    // Waits for the shift lookup. Starting before the till is known
+    // would put the first sale of the day outside the day.
+    if (!locationId || saleId || starting.current || shifts.isPending) return;
     starting.current = true;
     start.mutate(undefined, { onSettled: () => (starting.current = false) });
-  }, [locationId, saleId]);
+  }, [locationId, saleId, shifts.isPending]);
 
   if (!locationId) {
     return (
@@ -226,6 +234,12 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
                 </button>
               </div>
             </div>
+          )}
+
+          {!shifts.isPending && !openShift && (
+            <Banner tone="warn">
+              No shift open. Sales will not appear at day end.
+            </Banner>
           )}
 
           {failure && (

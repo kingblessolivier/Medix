@@ -149,3 +149,84 @@ class TestEveryEndpointIsBound:
         assert unbound == [], (
             "These views do not set the active organization: " + ", ".join(sorted(set(unbound)))
         )
+
+
+class TestADuplicateSaysWhatIsDuplicated:
+    """A taken code answered "Something went wrong. Try again."
+
+    Every tenant-scoped record with a code is unique on
+    `(organization, code)`. The organization is injected in
+    `perform_create()`, so it is not in the serializer's data, so DRF's
+    `UniqueTogetherValidator` never sees it and never fires. The database
+    caught it and the `IntegrityError` reached the user as a 500.
+
+    Found by adding a till twice.
+    """
+
+    @pytest.fixture
+    def pharmacy(self, db):
+        from rest_framework.test import APIClient
+
+        from core.models import Branch, User
+
+        org = Organization.objects.create(name="Kigali Care", primary_kind="RETAIL")
+        branch = Branch.objects.create(organization=org, name="Main", code="MAIN")
+        user = User.objects.create_user(username="marie", password="x", organization=org)
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return {"org": org, "branch": branch, "client": client}
+
+    def test_a_taken_code_is_a_conflict_not_a_crash(self, pharmacy):
+        body = {"name": "Front", "code": "T1", "branch": str(pharmacy["branch"].id)}
+        assert pharmacy["client"].post("/api/v1/tills/", body, format="json").status_code == 201
+
+        again = pharmacy["client"].post("/api/v1/tills/", body, format="json")
+        assert again.status_code == 409
+        assert again.data["error"]["code"] == "duplicate"
+
+    def test_it_names_what_was_duplicated(self, pharmacy):
+        """"Something went wrong" tells a person nothing to do next."""
+        body = {"name": "Front", "code": "T1", "branch": str(pharmacy["branch"].id)}
+        pharmacy["client"].post("/api/v1/tills/", body, format="json")
+        again = pharmacy["client"].post("/api/v1/tills/", body, format="json")
+
+        assert "code" in again.data["error"]["message"]
+        assert again.data["error"]["meta"]["field"] == "code"
+
+    def test_a_location_code_too(self, pharmacy):
+        body = {
+            "name": "Cold room",
+            "code": "COLD",
+            "kind": "STORE",
+            "temperature_class": "COLD_2_8",
+        }
+        assert (
+            pharmacy["client"].post("/api/v1/locations/", body, format="json").status_code
+            == 201
+        )
+        again = pharmacy["client"].post("/api/v1/locations/", body, format="json")
+        assert again.status_code == 409
+        assert "location" in again.data["error"]["message"].lower()
+
+    def test_another_organization_may_use_the_same_code(self, pharmacy):
+        """Uniqueness is per pharmacy. Two of them may both have a "T1"."""
+        from core.models import Branch, User
+        from rest_framework.test import APIClient
+
+        body = {"name": "Front", "code": "T1", "branch": str(pharmacy["branch"].id)}
+        pharmacy["client"].post("/api/v1/tills/", body, format="json")
+
+        other = Organization.objects.create(name="ABC", primary_kind="WHOLESALE")
+        other_branch = Branch.objects.create(organization=other, name="Depot", code="DEP")
+        stranger = User.objects.create_user(
+            username="jean", password="x", organization=other
+        )
+        client = APIClient()
+        client.force_authenticate(user=stranger)
+
+        response = client.post(
+            "/api/v1/tills/",
+            {"name": "Front", "code": "T1", "branch": str(other_branch.id)},
+            format="json",
+        )
+        assert response.status_code == 201

@@ -39,6 +39,7 @@ import {
   type ControlledQuota,
   type Manufacturer,
   type TaxRule,
+  type Location,
 } from "@/lib/api";
 
 const DAY = new Intl.DateTimeFormat("en-GB", {
@@ -48,6 +49,7 @@ const DAY = new Intl.DateTimeFormat("en-GB", {
 });
 
 const TABS: TableTab[] = [
+  { id: "locations", label: "Locations" },
   { id: "manufacturers", label: "Manufacturers" },
   { id: "categories", label: "Categories" },
   { id: "thresholds", label: "Alert thresholds" },
@@ -56,18 +58,182 @@ const TABS: TableTab[] = [
 ];
 
 export function SettingsScreen() {
-  const [tab, setTab] = useState("manufacturers");
+  const [tab, setTab] = useState("locations");
 
   return (
     <>
       <PageHeader title="Settings" description="Reference data and thresholds." />
       <TableTabs tabs={TABS} active={tab} onChange={setTab} />
 
+      {tab === "locations" && <Locations />}
       {tab === "manufacturers" && <Manufacturers />}
       {tab === "categories" && <Categories />}
       {tab === "thresholds" && <Thresholds />}
       {tab === "tax" && <TaxRules />}
       {tab === "quotas" && <Quotas />}
+    </>
+  );
+}
+
+/* -- locations ---------------------------------------------------------- */
+
+/* The stored values, from LocationKind and TemperatureClass in
+   backend/inventory/models.py. Inventing them is invisible until the
+   server rejects the choice — `core/tests/test_enums.py` now fails
+   instead. */
+const LOCATION_KINDS = [
+  ["STORE", "Store"],
+  ["BRANCH", "Branch"],
+] as const;
+
+/* A fridge is a store with a cold class, not a kind of its own: the
+   temperature is the statement that decides what may be kept there. */
+const TEMPERATURES = [
+  ["AMBIENT", "Ambient"],
+  ["COOL_15_25", "Cool, 15–25°C"],
+  ["COLD_2_8", "Cold, 2–8°C"],
+  ["FROZEN", "Frozen"],
+] as const;
+
+/* A pharmacy got whatever onboarding created and could add nothing —
+   no cold room, no back store, no second counter. Stock has to live
+   somewhere, and every movement names a location, so this was a hard
+   floor on how the premises could be modelled. */
+function Locations() {
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [kind, setKind] = useState<string>("STORE");
+  const [temperature, setTemperature] = useState<string>("AMBIENT");
+  const [failure, setFailure] = useState("");
+
+  const locations = useQuery({
+    queryKey: ["locations"],
+    queryFn: () => api.locations(),
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveLocation({ name, code, kind, temperature_class: temperature }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["locations"] });
+      setAdding(false);
+      setName("");
+      setCode("");
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not saved."),
+  });
+
+  const columns: Column<Location>[] = [
+    { key: "name", header: "Name", render: (l) => l.name },
+    { key: "code", header: "Code", mono: true, render: (l) => l.code },
+    {
+      key: "kind",
+      header: "Kind",
+      render: (l) => (l.kind ?? "").toLowerCase() || "—",
+    },
+    {
+      key: "temperature",
+      header: "Storage",
+      render: (l) =>
+        l.temperature_class === "AMBIENT" || !l.temperature_class ? (
+          <span className="text-text-2">Ambient</span>
+        ) : (
+          <Badge tone="brand">{l.temperature_class === "COLD" ? "2–8°C" : "Frozen"}</Badge>
+        ),
+    },
+  ];
+
+  return (
+    <>
+      <div className="mb-3 flex justify-end">
+        <Button
+          variant="primary"
+          icon={<Plus size={15} strokeWidth={2} aria-hidden />}
+          onClick={() => setAdding(true)}
+        >
+          Add location
+        </Button>
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={locations.data?.results ?? []}
+        rowKey={(l) => l.id}
+        density="compact"
+        caption="Locations"
+        emptyHeading="No locations"
+        emptyBody="Stock has to live somewhere."
+      />
+
+      {adding && (
+        <Modal
+          open
+          title="Add location"
+          onClose={() => setAdding(false)}
+          footer={
+            <Button
+              variant="primary"
+              className="w-full"
+              disabled={!name.trim() || !code.trim()}
+              loading={save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Add location
+            </Button>
+          }
+        >
+          {failure && (
+            <Banner tone="bad" className="mb-4">
+              {failure}
+            </Banner>
+          )}
+          <div className="flex flex-col gap-4">
+            <Field label="Name" required>
+              {(id) => (
+                <Input id={id} value={name} onChange={(e) => setName(e.target.value)} />
+              )}
+            </Field>
+            <Field label="Code" help="Short. It appears on every movement." required>
+              {(id) => (
+                <Input id={id} value={code} onChange={(e) => setCode(e.target.value)} />
+              )}
+            </Field>
+            <Field label="Kind" required>
+              {(id) => (
+                <Select id={id} value={kind} onChange={(e) => setKind(e.target.value)}>
+                  {LOCATION_KINDS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <Field
+              label="Storage"
+              help="A cold-chain product cannot be put in an ambient room."
+              required
+            >
+              {(id) => (
+                <Select
+                  id={id}
+                  value={temperature}
+                  onChange={(e) => setTemperature(e.target.value)}
+                >
+                  {TEMPERATURES.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

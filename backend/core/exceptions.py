@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from django.core.exceptions import PermissionDenied, ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.http import Http404
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
@@ -71,8 +72,72 @@ def _envelope(code: str, message: str, *, detail="", field=None, meta=None, erro
     return body
 
 
+class Duplicate(DomainError):
+    """This already exists. 409, because the request was well formed."""
+
+    status_code = status.HTTP_409_CONFLICT
+    default_code = "duplicate"
+    default_detail = "That already exists."
+
+
+#: Constraint name → what the person actually typed. Only the ones a
+#: person can hit from a form; anything else falls back to a generic
+#: message rather than showing them a constraint name.
+DUPLICATE_MESSAGES = {
+    "uq_location_code": ("code", "A location already uses that code."),
+    "uq_till_code": ("code", "A till already uses that code."),
+    "uq_branch_code": ("code", "A branch already uses that code."),
+    "uq_manufacturer_name": ("name", "That manufacturer is already listed."),
+    "uq_expense_category_code": ("code", "That category code is taken."),
+    "uq_product_type": ("code", "That product type already exists."),
+    "uq_licence_number": ("number", "That licence number is already recorded."),
+    "uq_council_number": ("council_number", "That council number is already recorded."),
+    "uq_device_code": ("code", "A device already uses that code."),
+    "uq_registration_number": (
+        "registration_number",
+        "That registration number is already recorded.",
+    ),
+    "uq_batch_number": ("batch_number", "That batch number already exists."),
+    "uq_member_number": ("member_number", "That member number is already recorded."),
+    "uq_listing_per_vendor_product": (
+        "product",
+        "This product is already listed. Edit the existing offer.",
+    ),
+    "uq_one_open_shift": ("till", "This till already has an open shift."),
+    "uq_one_primary_image": ("is_primary", "This product already has a main picture."),
+}
+
+
+def _as_duplicate(exc) -> Duplicate | None:
+    """Turn a unique violation into something a person can act on.
+
+    The constraint name is the only reliable identifier — the driver's
+    message wording differs between backends and versions.
+    """
+    text = str(exc)
+    for constraint, (field, message) in DUPLICATE_MESSAGES.items():
+        if constraint in text:
+            return Duplicate(message, code="duplicate", meta={"field": field})
+    if "duplicate key value" in text or "UNIQUE constraint failed" in text:
+        return Duplicate()
+    return None
+
+
 def exception_handler(exc, context):
     """Map every exception onto the documented envelope."""
+    if isinstance(exc, IntegrityError):
+        # A constraint the serializer could not check, because the
+        # organization is injected after validation.
+        duplicate = _as_duplicate(exc)
+        if duplicate is not None:
+            exc = duplicate
+        else:
+            log.exception("Unhandled integrity error", exc_info=exc)
+            return Response(
+                _envelope("conflict", "That change conflicts with existing data."),
+                status=status.HTTP_409_CONFLICT,
+            )
+
     if isinstance(exc, Http404):
         return Response(
             _envelope("not_found", "Not found."), status=status.HTTP_404_NOT_FOUND
