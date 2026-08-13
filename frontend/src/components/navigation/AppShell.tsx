@@ -10,6 +10,7 @@ import clsx from "clsx";
 import {
   ArrowLeftRight,
   Bell,
+  BookOpen,
   Building2,
   ChartNoAxesCombined,
   ClipboardList,
@@ -45,7 +46,10 @@ export type NavGroup = { label: string; items: NavItem[] };
 export function navigationFor(capabilities: string[]): NavGroup[] {
   const can = (c: string) => capabilities.includes(c);
 
-  const operations: NavItem[] = [{ id: "inventory", label: "Inventory", icon: Package }];
+  const operations: NavItem[] = [
+    { id: "inventory", label: "Inventory", icon: Package },
+    { id: "catalogue", label: "Catalogue", icon: BookOpen },
+  ];
   if (can("SELL_RETAIL")) {
     operations.push({ id: "pos", label: "Point of sale", icon: Receipt });
   }
@@ -139,6 +143,7 @@ export function AppShell({
   organizationName,
   userName,
   onSignOut,
+  onSearch,
   children,
 }: {
   groups?: NavGroup[];
@@ -147,6 +152,9 @@ export function AppShell({
   organizationName?: string;
   userName?: string;
   onSignOut?: () => void;
+  /** Opens the command palette. The top bar's field is a button for it,
+      not an input — searching happens in the palette. */
+  onSearch?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -158,7 +166,7 @@ export function AppShell({
         organizationName={organizationName}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar userName={userName} onSignOut={onSignOut} />
+        <TopBar userName={userName} onSignOut={onSignOut} onSearch={onSearch} />
         <main className="mx-auto w-full max-w-content flex-1 p-6">{children}</main>
         <StatusBar />
       </div>
@@ -231,7 +239,15 @@ function Sidebar({
 
 /* -- Top bar ----------------------------------------------------------- */
 
-function TopBar({ userName, onSignOut }: { userName?: string; onSignOut?: () => void }) {
+function TopBar({
+  userName,
+  onSignOut,
+  onSearch,
+}: {
+  userName?: string;
+  onSignOut?: () => void;
+  onSearch?: () => void;
+}) {
   return (
     /* Disappears into the environment — same neutral family as the
      * workspace, separated by a 1px divider. */
@@ -242,6 +258,7 @@ function TopBar({ userName, onSignOut }: { userName?: string; onSignOut?: () => 
        * the content. */}
       <button
         type="button"
+        onClick={onSearch}
         className="flex h-8 w-full max-w-[420px] items-center gap-2 rounded-md bg-hover px-3 text-left text-body text-text-3 transition-colors hover:ring-1 hover:ring-border"
       >
         <Search size={15} strokeWidth={1.8} />

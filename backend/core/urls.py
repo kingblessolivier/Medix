@@ -13,6 +13,7 @@ router.register(
 
 urlpatterns = [
     path("health/", views.health, name="health"),
+    path("search/", views.SearchView.as_view(), name="search"),
     path("pharmacies/", views.PharmacyViewSet.as_view({"get": "list"}), name="pharmacies"),
     path(
         "pharmacies/register/",

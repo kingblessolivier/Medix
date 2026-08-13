@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core import onboarding
+from core import onboarding, search as search_service
 from core.capabilities import Capability, require_capability
 from core.models import LicenceKind, PremisesLicence
 
@@ -124,6 +124,33 @@ class RegisterPharmacyView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class SearchView(APIView):
+    """One question — where is that thing — across every record type.
+
+    A pharmacist holding a carton with a number on it should not have to
+    know which screen that number belongs to.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        found = search_service.search(
+            user=request.user, term=request.query_params.get("q", "")
+        )
+        # Reaching a patient by search is an access to health data, and
+        # docs/16 counts reads as events worth recording.
+        if any(hit["kind"] == "patient" for hit in found["results"]):
+            from core import audit
+
+            audit.record(
+                action="sales.patient.searched",
+                actor=request.user,
+                after={"term": found["term"]},
+                organization=request.user.organization,
+            )
+        return Response(found)
 
 
 class PharmacyViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):

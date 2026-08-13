@@ -474,6 +474,48 @@ export type BatchTrace = {
   on_hand_base: number;
 };
 
+/** One thing found, and the screen that opens it. */
+export type SearchHit = {
+  kind: string;
+  id: string;
+  title: string;
+  subtitle: string;
+  screen: string;
+};
+
+export type ProductImage = {
+  id: string;
+  product: string;
+  image: string;
+  alt: string;
+  is_primary: boolean;
+  position: number;
+};
+
+export type ProductRegistration = {
+  id: string;
+  product: string;
+  registration_number: string;
+  holder: string;
+  manufacturer: string;
+  manufacturer_country: string;
+  registration_expiry: string | null;
+  status: string;
+};
+
+export type ClinicalAttribute = {
+  id: string;
+  product: string;
+  kind: string;
+  kind_label: string;
+  value_number: number | null;
+  value_text: string;
+  source: string;
+  source_reference: string;
+  effective_from: string;
+  effective_to: string | null;
+};
+
 /** Licences and registrations, read live rather than from a status column. */
 export type ComplianceState = {
   as_of: string;
@@ -963,6 +1005,58 @@ export const api = {
   pharmacies: () => request<Pharmacy[]>("/pharmacies/"),
 
   compliance: () => request<ComplianceState>("/compliance/"),
+
+  search: (term: string) =>
+    request<{ term: string; results: SearchHit[] }>(
+      `/search/?q=${encodeURIComponent(term)}`,
+    ),
+
+  /* -- product depth --------------------------------------------------- */
+
+  units: (productId: string) =>
+    request<Paginated<UnitOfMeasureRow>>(`/units/?product=${productId}`),
+  saveUnit: (body: Record<string, unknown>) =>
+    request<UnitOfMeasureRow>("/units/", { method: "POST", body }),
+
+  productImages: (productId: string) =>
+    request<Paginated<ProductImage>>(`/product-images/?product=${productId}`),
+  /* multipart, so it bypasses `request` — that helper JSON-encodes every
+     body and would send "[object File]". */
+  uploadProductImage: async (body: FormData) => {
+    const headers: Record<string, string> = {};
+    const access = tokens.access;
+    if (access) headers.Authorization = `Bearer ${access}`;
+    const response = await fetch(`${BASE}/product-images/`, {
+      method: "POST",
+      headers,
+      body,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new ApiFailure(
+        response.status,
+        (payload as { error: ApiError } | null)?.error ?? {
+          code: "upload_failed",
+          message: "Not uploaded.",
+        },
+      );
+    }
+    return (await response.json()) as ProductImage;
+  },
+
+  productRegistrations: (productId: string) =>
+    request<Paginated<ProductRegistration>>(
+      `/product-registrations/?product=${productId}`,
+    ),
+  saveProductRegistration: (body: Record<string, unknown>) =>
+    request<ProductRegistration>("/product-registrations/", { method: "POST", body }),
+
+  clinicalAttributes: (productId: string) =>
+    request<Paginated<ClinicalAttribute>>(
+      `/clinical-attributes/?product=${productId}`,
+    ),
+  saveClinicalAttribute: (body: Record<string, unknown>) =>
+    request<ClinicalAttribute>("/clinical-attributes/", { method: "POST", body }),
   intelligence: (params: { start?: string; end?: string } = {}) => {
     const query = new URLSearchParams();
     if (params.start) query.set("start", params.start);

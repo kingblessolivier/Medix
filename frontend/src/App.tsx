@@ -4,11 +4,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { AppShell, navigationFor } from "@/components/navigation/AppShell";
+import {
+  CommandPalette,
+  useCommandPalette,
+} from "@/components/navigation/CommandPalette";
 import { EmptyState } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { api, logout, tokens } from "@/lib/api";
 import { IntelligenceScreen } from "@/modules/analytics/IntelligenceScreen";
 import { PerformanceScreen } from "@/modules/analytics/PerformanceScreen";
+import { ProductEditor } from "@/modules/catalogue/ProductEditor";
 import { ComplianceScreen } from "@/modules/compliance/ComplianceScreen";
 import { DistributionScreen } from "@/modules/distribution/DistributionScreen";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
@@ -32,6 +37,7 @@ export default function App() {
   const queryClient = useQueryClient();
   const [signedIn, setSignedIn] = useState(() => Boolean(tokens.access));
   const [active, setActive] = useState("overview");
+  const [paletteOpen, setPaletteOpen] = useCommandPalette();
 
   const me = useQuery({
     queryKey: ["me"],
@@ -87,8 +93,15 @@ export default function App() {
   const canSupply = granted.includes("SELL_WHOLESALE");
 
   return (
+    <>
+    <CommandPalette
+      open={paletteOpen}
+      onClose={() => setPaletteOpen(false)}
+      onNavigate={setActive}
+    />
     <AppShell
       groups={navigationFor(granted)}
+      onSearch={() => setPaletteOpen(true)}
       active={active}
       onNavigate={setActive}
       organizationName={me.data?.organization?.name}
@@ -151,6 +164,8 @@ export default function App() {
           <ComplianceScreen />
         ) : active === "intelligence" ? (
           <IntelligenceScreen />
+        ) : active === "catalogue" ? (
+          <ProductEditor />
         ) : (
           <EmptyState
             heading="Not built yet"
@@ -159,5 +174,6 @@ export default function App() {
         )}
       </ErrorBoundary>
     </AppShell>
+    </>
   );
 }
