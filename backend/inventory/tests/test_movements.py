@@ -331,6 +331,58 @@ class TestTrace:
         assert trace["patients"] == []
         assert trace["customers"] == []
 
+    def test_it_says_which_room_the_stock_is_in(self, pharmacy):
+        """docs/09: every unit traced to its current location or its sale.
+
+        A total says how much is left and not where to send anybody —
+        "1,000 on hand" reads identically whether that is one shelf or
+        four branches.
+        """
+        trace = movements.trace_batch(
+            organization=pharmacy["org"], batch=pharmacy["batch"]
+        )
+        assert [row["location"] for row in trace["locations"]] == [
+            pharmacy["store"].name
+        ]
+        assert trace["locations"][0]["quantity_base"] == 1_000
+
+    def test_stock_split_across_rooms_is_listed_room_by_room(self, pharmacy):
+        from inventory.tests.factories import make_location
+
+        cold = make_location(pharmacy["org"], "Cold room", "COLD")
+        movements.transfer(
+            organization=pharmacy["org"],
+            batch=pharmacy["batch"],
+            from_location=pharmacy["store"],
+            to_location=cold,
+            quantity=Quantity(3, uom(pharmacy["product"], "PACK")),
+            performed_by=pharmacy["user"],
+        )
+        trace = movements.trace_batch(
+            organization=pharmacy["org"], batch=pharmacy["batch"]
+        )
+
+        held = {row["location"]: row["quantity_base"] for row in trace["locations"]}
+        assert held == {"Cold room": 300, pharmacy["store"].name: 700}
+        assert trace["on_hand_base"] == 1_000
+
+    def test_the_status_travels_with_the_room(self, pharmacy):
+        """Quarantined stock is still on the premises and still recalled."""
+        movements.quarantine(
+            organization=pharmacy["org"],
+            batch=pharmacy["batch"],
+            location=pharmacy["store"],
+            quantity=Quantity(2, uom(pharmacy["product"], "PACK")),
+            performed_by=pharmacy["user"],
+            reason="Damaged outer carton.",
+        )
+        trace = movements.trace_batch(
+            organization=pharmacy["org"], batch=pharmacy["batch"]
+        )
+        statuses = {row["status"] for row in trace["locations"]}
+        assert len(statuses) == 2
+        assert trace["on_hand_base"] == 1_000
+
     def test_it_names_the_patients_it_was_dispensed_to(self, pharmacy):
         """The half of a recall that actually protects anyone."""
         from core.models import Branch

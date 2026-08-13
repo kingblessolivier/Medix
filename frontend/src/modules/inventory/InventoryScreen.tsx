@@ -7,20 +7,24 @@
  * See docs/19-screens.md §6 and §7.
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 
-import { api, type Movement, type StockRow } from "@/lib/api";
+import { ApiFailure, api, type Movement, type StockRow } from "@/lib/api";
 import { DataTable, DataToolbar, type Column, type Density } from "@/components/data/DataTable";
 import {
+  Banner,
   Button,
   ErrorState,
+  Field,
+  Input,
   PageHeader,
   StatusDot,
   StatusPill,
   type Tone,
 } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
+import { Consequence } from "@/components/ui/Guidance";
 import { AlertStack } from "@/components/ui/AlertStack";
 
 /** Expiry banding. Status is never colour alone — the dot carries a label. */
@@ -180,14 +184,44 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: s
 }
 
 function BatchModal({ row, onClose }: { row: StockRow | null; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [reason, setReason] = useState("");
+  const [failure, setFailure] = useState("");
+
   const movements = useQuery({
     queryKey: ["movements", row?.batch],
     queryFn: () => api.movements(`?batch=${row!.batch}`),
     enabled: Boolean(row),
   });
 
+  /* Held stock had no way out of the interface at all. Cold-chain
+     excursions quarantine automatically, so a fridge fault could freeze
+     a batch permanently with nothing on any screen to unfreeze it. The
+     decision is a pharmacist's and it needs a reason, which is why this
+     is a field and not a button. */
+  const release = useMutation({
+    mutationFn: () =>
+      api.releaseBatch({ batch: row!.batch, location: row!.location, reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["stock"] });
+      queryClient.invalidateQueries({ queryKey: ["movements", row?.batch] });
+      setReason("");
+      onClose();
+    },
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Couldn't release.",
+      ),
+  });
+
+  useEffect(() => {
+    setReason("");
+    setFailure("");
+  }, [row?.id]);
+
   if (!row) return null;
   const { tone, label } = expiryTone(row.days_to_expiry);
+  const held = row.status === "QUARANTINED";
 
   return (
     <Modal
@@ -195,8 +229,53 @@ function BatchModal({ row, onClose }: { row: StockRow | null; onClose: () => voi
       title={row.product_name}
       subtitle={`Batch ${row.batch_number}`}
       onClose={onClose}
-      footer={<Button className="w-full">View full history</Button>}
+      footer={
+        held ? (
+          <Button
+            variant="primary"
+            className="w-full"
+            disabled={!reason.trim()}
+            loading={release.isPending}
+            onClick={() => release.mutate()}
+          >
+            Release to available
+          </Button>
+        ) : (
+          <Button className="w-full">View full history</Button>
+        )
+      }
     >
+      {held && (
+        <div className="mb-4">
+          <Banner tone="warn" className="mb-3">
+            Held. Not sellable until someone decides it is safe.
+          </Banner>
+          <Consequence
+            lines={[
+              `Moves ${row.quantity_base.toLocaleString()} back into available stock.`,
+              "The reason is recorded against the batch.",
+            ]}
+          />
+          <div className="mt-3">
+            <Field label="Reason" required>
+              {(id) => (
+                <Input
+                  id={id}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Within tolerance"
+                />
+              )}
+            </Field>
+          </div>
+          {failure && (
+            <Banner tone="bad" className="mt-3">
+              {failure}
+            </Banner>
+          )}
+        </div>
+      )}
+
       <DetailList
         rows={[
           ["Quantity", row.quantity_base.toLocaleString()],

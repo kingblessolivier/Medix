@@ -258,6 +258,52 @@ function RaiseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     enabled: open,
   });
 
+  /* A pharmacy on its first day has no patients and no prescribers, and
+     a select with nothing in it and no way to add anything is a dead
+     end — the screen could not be used at all. Inline rather than a
+     second modal: a modal never opens another modal. */
+  const [newPatient, setNewPatient] = useState(false);
+  const [patientName, setPatientName] = useState("");
+  const [patientPhone, setPatientPhone] = useState("");
+  const [newPrescriber, setNewPrescriber] = useState(false);
+  const [prescriberName, setPrescriberName] = useState("");
+  const [councilNumber, setCouncilNumber] = useState("");
+
+  const addPatient = useMutation({
+    mutationFn: () =>
+      api.savePatient({ full_name: patientName, phone: patientPhone }),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      setPatient(created.id);
+      setNewPatient(false);
+      setPatientName("");
+      setPatientPhone("");
+    },
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Patient not saved.",
+      ),
+  });
+
+  const addPrescriber = useMutation({
+    mutationFn: () =>
+      api.savePrescriber({
+        full_name: prescriberName,
+        council_number: councilNumber,
+      }),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["prescribers"] });
+      setPrescriber(created.id);
+      setNewPrescriber(false);
+      setPrescriberName("");
+      setCouncilNumber("");
+    },
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Prescriber not saved.",
+      ),
+  });
+
   const raise = useMutation({
     mutationFn: () =>
       api.createPrescription({
@@ -309,36 +355,134 @@ function RaiseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
       </Banner>
 
       <div className="flex flex-col gap-4">
-        <Field label="Patient" required>
-          {(id) => (
-            <Select id={id} value={patient} onChange={(e) => setPatient(e.target.value)}>
-              <option value="">Choose a patient</option>
-              {(patients.data?.results ?? []).map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.full_name}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
+        {newPatient ? (
+          <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <Field label="Patient name" required>
+              {(id) => (
+                <Input
+                  id={id}
+                  value={patientName}
+                  onChange={(e) => setPatientName(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Phone" help="How you would reach them on a recall.">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={patientPhone}
+                  onChange={(e) => setPatientPhone(e.target.value)}
+                />
+              )}
+            </Field>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setNewPatient(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                className="flex-1"
+                disabled={!patientName.trim()}
+                loading={addPatient.isPending}
+                onClick={() => addPatient.mutate()}
+              >
+                Add patient
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Field label="Patient" required>
+            {(id) => (
+              <div className="flex gap-2">
+                <Select
+                  id={id}
+                  value={patient}
+                  onChange={(e) => setPatient(e.target.value)}
+                  className="flex-1"
+                >
+                  <option value="">Choose a patient</option>
+                  {(patients.data?.results ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.full_name}
+                    </option>
+                  ))}
+                </Select>
+                <Button variant="secondary" onClick={() => setNewPatient(true)}>
+                  New
+                </Button>
+              </div>
+            )}
+          </Field>
+        )}
 
-        <Field label="Prescriber">
-          {(id) => (
-            <Select
-              id={id}
-              value={prescriber}
-              onChange={(e) => setPrescriber(e.target.value)}
-            >
-              <option value="">Not recorded</option>
-              {(prescribers.data?.results ?? []).map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.full_name}
-                  {row.council_number ? ` · ${row.council_number}` : ""}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
+        {newPrescriber ? (
+          <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <Field label="Prescriber name" required>
+              {(id) => (
+                <Input
+                  id={id}
+                  value={prescriberName}
+                  onChange={(e) => setPrescriberName(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Council number" help="Goes on the dispensing record.">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={councilNumber}
+                  onChange={(e) => setCouncilNumber(e.target.value)}
+                />
+              )}
+            </Field>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setNewPrescriber(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                className="flex-1"
+                disabled={!prescriberName.trim()}
+                loading={addPrescriber.isPending}
+                onClick={() => addPrescriber.mutate()}
+              >
+                Add prescriber
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Field label="Prescriber">
+            {(id) => (
+              <div className="flex gap-2">
+                <Select
+                  id={id}
+                  value={prescriber}
+                  onChange={(e) => setPrescriber(e.target.value)}
+                  className="flex-1"
+                >
+                  <option value="">Not recorded</option>
+                  {(prescribers.data?.results ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.full_name}
+                      {row.council_number ? ` · ${row.council_number}` : ""}
+                    </option>
+                  ))}
+                </Select>
+                <Button variant="secondary" onClick={() => setNewPrescriber(true)}>
+                  New
+                </Button>
+              </div>
+            )}
+          </Field>
+        )}
 
         <Field label="Issued on">
           {(id) => (

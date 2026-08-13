@@ -22,6 +22,8 @@ import { ClaimsScreen } from "@/modules/insurance/ClaimsScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
 import { OverviewScreen } from "@/modules/overview/OverviewScreen";
 import { PharmaciesScreen } from "@/modules/pharmacies/PharmaciesScreen";
+import { AssistantScreen } from "@/modules/assistant/AssistantScreen";
+import { ColdChainScreen } from "@/modules/coldchain/ColdChainScreen";
 import { RecallScreen } from "@/modules/recall/RecallScreen";
 import { ReturnsScreen } from "@/modules/returns/ReturnsScreen";
 import { PrescriptionsScreen } from "@/modules/prescriptions/PrescriptionsScreen";
@@ -154,6 +156,10 @@ export default function App() {
           <PharmaciesScreen />
         ) : active === "settings" ? (
           <SettingsScreen />
+        ) : active === "assistant" ? (
+          <AssistantScreen onNavigate={setActive} />
+        ) : active === "coldchain" ? (
+          <ColdChainScreen />
         ) : active === "recall" ? (
           <RecallScreen />
         ) : active === "returns" ? (

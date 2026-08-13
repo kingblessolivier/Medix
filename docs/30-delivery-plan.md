@@ -764,3 +764,48 @@ listings had a depot minimum higher than what the depot had left — a real
 state, and one the buyer has to ring the depot about rather than keep
 clicking. The order detail now states it: *Minimum is 20, and 8 are
 left.*
+
+
+---
+
+## Stage 14 — What the backend did and no screen offered
+
+A route-level comparison of the URL conf against `frontend/src/lib/api.ts`,
+in both directions: a backend route no screen calls, and a client method
+no screen calls. Both are the same failure — work that exists, passes its
+tests, and cannot be used.
+
+It found four, and two of them were blockers.
+
+**Nobody could record a pharmacist's registration.** The compliance
+dashboard reported *dispensing: blocked* and there was no endpoint at all
+to record the council registration that unblocks it — so no prescription
+could ever be verified, and no prescription-only medicine could ever be
+dispensed. Premises licences were the same: capability derives from held
+licences, the screen warned that one expires in thirty days, and there was
+no way to record the renewal. Both are writable now, and renewal adds a
+record rather than editing one, because a licence is evidence of what was
+permitted between two dates.
+
+**Quarantined stock had no way out of the interface.** `api.releaseBatch`
+existed and nothing called it. Combined with cold-chain auto-quarantine,
+a fridge fault could freeze a batch permanently with nothing on any screen
+to unfreeze it.
+
+**The Assistant had no screen.** Built the week before with 43 tests and
+no way for anybody to ask it anything — precisely the sin the approval
+chain had already demonstrated.
+
+**Cold chain had no screen.** The one alert in the system that acts rather
+than warns: it quarantines stock without asking, and there was nothing to
+say why or to let a person decide about it.
+
+**And a pharmacy on its first day could not raise a prescription** —
+"choose a patient" against an empty list, with no way to add one, though
+`api.savePatient` and `api.savePrescriber` had both been written.
+
+Also fixed from the previous pass: the batch trace reported
+`on_hand_base` and nothing about *where*. docs/09 sets the criterion as
+tracing every unit to its current location or its sale; a total reads
+identically whether the stock is on one shelf or in four branches, and
+nobody can be sent to fetch a total.

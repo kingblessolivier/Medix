@@ -26,6 +26,8 @@ import {
   ShoppingCart,
   Store,
   ShieldCheck,
+  Sparkles,
+  Snowflake,
   Sun,
   TriangleAlert,
   Truck,
@@ -56,6 +58,9 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   }
   operations.push({ id: "transfers", label: "Transfers", icon: ArrowLeftRight });
   operations.push({ id: "returns", label: "Returns", icon: Undo2 });
+  // The one alert that acts rather than warns, so it needs somewhere
+  // to be seen: an excursion holds stock without asking anybody.
+  operations.push({ id: "coldchain", label: "Cold chain", icon: Snowflake });
   // A depot's fulfilment queue. Gated on publishing rather than on
   // DISTRIBUTE: if you can offer stock you have orders to pick.
   if (can("PUBLISH_LISTINGS")) {
@@ -77,7 +82,15 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   }
 
   const groups: NavGroup[] = [
-    { label: "Main", items: [{ id: "overview", label: "Overview", icon: LayoutDashboard }] },
+    {
+      label: "Main",
+      items: [
+        { id: "overview", label: "Overview", icon: LayoutDashboard },
+        // Top, because it is the fastest route to a question a
+        // pharmacist already knows how to ask.
+        { id: "assistant", label: "Ask Medix", icon: Sparkles },
+      ],
+    },
     { label: "Operations", items: operations },
     { label: "Commerce", items: commerce },
   ];

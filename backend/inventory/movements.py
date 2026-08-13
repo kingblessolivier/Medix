@@ -14,7 +14,6 @@ See docs/05-modules.md §2 and docs/06-compliance.md.
 from __future__ import annotations
 
 from django.db import transaction
-from django.db.models import Sum
 
 from core import audit, sequences
 from core.exceptions import DomainError
@@ -411,18 +410,38 @@ def trace_batch(*, organization: Organization, batch: Batch) -> dict:
         for line in shipped
     ]
 
+    # Where the rest of it is sitting, room by room. A total tells a
+    # pharmacist how much is left and not where to send anybody — and
+    # "3,700 on hand" reads identically whether that is one shelf or
+    # four branches. docs/09 sets the criterion as tracing every unit to
+    # its current location *or* its sale, so both halves are answered.
+    held = (
+        StockBalance.objects.filter(
+            organization=organization, batch=batch, quantity_base__gt=0
+        )
+        .select_related("location", "location__branch")
+        .order_by("location__name")
+    )
+    locations = [
+        {
+            "location": balance.location.name,
+            "branch": (
+                balance.location.branch.name if balance.location.branch_id else ""
+            ),
+            "status": balance.get_status_display(),
+            "quantity_base": balance.quantity_base,
+        }
+        for balance in held
+    ]
+
     return {
         "batch": batch.batch_number,
         "product": batch.product.name,
         "expiry_date": batch.expiry_date.isoformat(),
+        "locations": locations,
         "patients": patients,
         "customers": customers,
         "dispensed_base": sum(row["quantity_base"] for row in patients),
         "dispatched_base": sum(row["quantity_base"] for row in customers),
-        "on_hand_base": (
-            StockBalance.objects.filter(
-                organization=organization, batch=batch
-            ).aggregate(total=Sum("quantity_base"))["total"]
-            or 0
-        ),
+        "on_hand_base": sum(row["quantity_base"] for row in locations),
     }
