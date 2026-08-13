@@ -1,0 +1,47 @@
+# Local development services.
+#
+# Credentials come from .env and are never written here. Copy .env.example
+# to .env and set POSTGRES_PASSWORD before the first `docker compose up`;
+# `make setup` checks it is present.
+#
+# Interpolation is kept to the plain ${VAR} form. The ${VAR:?message}
+# variant reads as a literal value to secret scanners.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: medix-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # 5442, not 5432 — this machine may already run a native PostgreSQL.
+    # An ambiguous port means Django can silently reach the wrong database.
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/scripts/init_db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: medix-redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:

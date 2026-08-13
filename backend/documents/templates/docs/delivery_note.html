@@ -1,0 +1,78 @@
+{% extends "docs/base_document.html" %}
+{% comment %}
+Travels with the cartons. The receiving pharmacist checks physical stock
+against these batch numbers and expiries, then signs. No prices: the
+delivery note proves what arrived, the invoice says what it costs, and
+merging the two puts commercial terms in the driver's hands.
+{% endcomment %}
+
+{% block meta %}
+<dt>Order</dt><dd class="mono">{{ order_number }}</dd>
+<dt>Dispatched</dt><dd>{{ dispatched_at }}</dd>
+<dt>Deliver to</dt><dd>{{ deliver_to }}</dd>
+{% endblock %}
+
+{% block body %}
+<section class="section">
+  <h2 class="section-title">Goods</h2>
+  <table class="items">
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th>Batch</th>
+        <th>Expiry</th>
+        <th class="num">Quantity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>
+          {{ line.product }}
+          {% if line.strength %}<span class="sub">{{ line.strength }}</span>{% endif %}
+          {% if line.cold_chain %}<span class="sub">Cold chain · 2–8°C</span>{% endif %}
+        </td>
+        <td class="mono">{{ line.batch }}</td>
+        <td class="mono">{{ line.expiry }}</td>
+        <td class="num">{{ line.quantity }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if carrier or driver %}
+<section class="section">
+  <h2 class="section-title">Transport</h2>
+  <div class="parties" style="border-bottom:none;padding-bottom:0">
+    <div class="party">
+      <p class="label">Carrier</p>
+      <p>{{ carrier|default:"—" }}</p>
+      {% if vehicle %}<p class="line mono">{{ vehicle }}</p>{% endif %}
+    </div>
+    <div class="party">
+      <p class="label">Driver</p>
+      <p>{{ driver|default:"—" }}</p>
+      {% if driver_licence %}<p class="line mono">{{ driver_licence }}</p>{% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block attestation %}
+<p class="label">Received</p>
+<div class="signatures">
+  <div class="sig">
+    <p class="rule"></p>
+    <p class="who">Name and council number</p>
+    <p class="role">Receiving pharmacist</p>
+  </div>
+  <div class="sig">
+    <p class="rule"></p>
+    <p class="who">Date and time</p>
+    <p class="role">On delivery</p>
+  </div>
+</div>
+<p class="note">Count against this note before signing. Record shortfalls on the goods receipt.</p>
+{% endblock %}

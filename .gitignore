@@ -26,3 +26,7 @@ Thumbs.db
 !.vscode/extensions.json
 agent/data/
 *.log
+
+.venv/
+frontend/dist/
+frontend/node_modules/

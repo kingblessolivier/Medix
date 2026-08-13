@@ -1,0 +1,21 @@
+Django==5.1.5
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+drf-spectacular==0.28.0
+django-filter==24.3
+psycopg[binary,pool]==3.2.3
+django-environ==0.11.2
+celery[redis]==5.4.0
+redis==5.2.1
+django-redis==5.4.0
+uuid-utils==0.10.0
+python-dateutil==2.9.0.post0
+# Product images: a buyer verifies the pack before ordering a carton.
+Pillow==12.3.0
+
+# Document rendering: headless Chromium renders exactly what the browser
+# preview shows, which is what docs/18 requires of a PDF. Needs
+# `playwright install chromium` (~400MB) on the host; a deployment that
+# cannot carry it sets DOCUMENT_PDF_BACKEND=none and still issues
+# documents as stored, hashed HTML.
+playwright==1.62.0

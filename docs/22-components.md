@@ -121,7 +121,7 @@ On by default. The header stays fixed for any row count, with `--content` backgr
 
 **Selection.** Checkbox column first, 40px wide. Selecting rows swaps the toolbar for a bulk-action bar showing the count and the available actions, with a clear escape.
 
-**Row click opens a drawer.** It never navigates away — see §8.
+**Row click opens a modal.** It never navigates away — see §8.
 
 ### States
 
@@ -130,6 +130,34 @@ On by default. The header stays fixed for any row count, with `--content` backgr
 - **Loading** — skeleton rows matching the real row height, so the layout does not jump.
 - **Empty** — see §12.
 - **Error** — inline message with a retry, table chrome preserved.
+
+### Saved views
+
+Counted tabs sit above the toolbar: `All orders 73 · Awaiting 21 · Confirmed 16 · Received 36`. The count belongs on the tab, because the count is usually the reason to click it.
+
+These are **filters over one list**, not navigation. The page title and URL do not change. A tab that loads a different resource is a nav item and belongs in the sidebar.
+
+```tsx
+<TableTabs tabs={tabs} active={view} onChange={setView} />
+```
+
+### Selection and bulk actions
+
+`selectable` adds the checkbox column; the selected ids are owned by the screen, not the table, so a screen can preserve a selection across a refetch.
+
+- Header checkbox is **indeterminate** when some but not all visible rows are chosen. `indeterminate` is a DOM property, not an attribute — it must be set through a ref.
+- Select-all affects **only rows currently in view**. A row filtered out keeps whatever the user already decided about it.
+- A selected row gets a `--selected` tint plus a 2px `--brand` bar on its leading edge. Never a saturated fill — the data has to stay readable.
+- The tick is drawn in `--on-brand`, never white: the dark theme's brand is a pale green.
+- The bulk bar appears **above** the table, so the rows it acts on stay visible. It never floats over content.
+
+A bulk action must not open a modal. Acting on twenty rows and being handed the twentieth row's detail panel is a bug, not a confirmation.
+
+### Row overflow
+
+The primary action is always the row click. The `⋯` menu is for the two or three things that are not it — and each entry states its own availability rather than disappearing, so the menu does not change shape between rows.
+
+Closes on outside click and on `Escape`. Destructive entries take `--bad-text` and sit last.
 
 ### What the table must never do
 
@@ -309,24 +337,28 @@ Width matches the faceplate unless options are longer, in which case it may grow
 
 ---
 
-## 8 — Drawer
+## 8 — Modal
 
 The signature interaction of the system.
 
 ```
-SEARCH → TABLE → DRAWER → FULL TRANSACTION
+SEARCH → TABLE → MODAL → FULL TRANSACTION
 ```
 
-Right-anchored, 480px wide (640px for dense content), full height, `--surface`, `--elev-3`, with a scrim at `rgba(15,23,42,.32)`.
+**Centred**, 520px wide (720px for dense content), capped at `85vh`, `--surface`, `--r-xl`, `--elev-3`, with a scrim at `rgba(15,23,42,.32)`.
 
-Header carries the title, a subtitle, and a close button. Footer, when present, carries actions right-aligned. Body scrolls; header and footer do not.
+This was a right-anchored drawer. Centring it is deliberate: a panel pinned to one edge reads as a sidebar the eye has to travel to, and it abandons the row that opened it on the far side of the screen. Centred, the detail arrives where the user is already looking.
 
-**Drawer for:** preview, quick edit, quick information, activity history.
+Height is capped rather than full-bleed, so the body scrolls inside the panel and the header and action stay on screen however long the content runs. The page behind does not scroll while a modal is open.
+
+Header carries the title, a subtitle, and a close button. Footer, when present, carries actions. Body scrolls; header and footer do not.
+
+**Modal for:** preview, quick edit, quick information, activity history.
 **Full page for:** purchase order creation, import request, receiving, POS, prescription processing, insurance claim, product creation.
 
 Closes on `Esc`, scrim click, or the close button. Focus is trapped while open and returns to the trigger on close.
 
-**A drawer never opens another drawer.** If that is needed, the flow belongs on a page.
+**A modal never opens another modal.** If that is needed, the flow belongs on a page.
 
 ---
 
@@ -367,13 +399,25 @@ Loading state replaces the label with a spinner and keeps the width, so the layo
 
 ## 11 — Status, badges, chips
 
-**Status** is a dot plus a label. Never colour alone, never a coloured row.
+**Status** is never colour alone and never a coloured row. It comes in two forms, and they are not interchangeable.
+
+**`StatusDot`** — a dot plus a sentence-case label, for modals, detail lists and prose.
 
 ```
 ● Available    ● Expiring    ● Critical    ● Draft
 ```
 
-Dot 8px, gap 6px, label 12px / 500 in the semantic colour.
+Dot 8px, gap 6px, label 13px in the semantic **text** ramp.
+
+**`StatusPill`** — the table form: tinted pill, 6px leading dot, 10px small caps.
+
+```
+[● FULFILLED]  [● CONFIRMED]  [● PARTIALLY SHIPPED]
+```
+
+Down a column of forty rows a bare dot and a sentence-case label blur into the neighbouring cells; the pill reads as one object. In a modal the same pill shouts. Use the pill inside `DataTable` columns, the dot everywhere else.
+
+Both take their word colour from `--ok-text` / `--warn-text` / `--bad-text` / `--info-text`, never from the mark ramp — see `docs/04-design-system.md`.
 
 **Badge** — a filled pill for counts and states: `3px 8px`, radius `999px`, 11px / 600, semantic tint background with same-family text.
 
@@ -543,7 +587,7 @@ Restrained. This is an operational system, not a showcase.
 |---|---|---|
 | Hover, focus | 100ms | `ease-out` |
 | Dropdown, popover | 120ms | `ease-out` |
-| Drawer | 200ms | `cubic-bezier(.2,0,0,1)` |
+| Modal | 200ms | `cubic-bezier(.2,0,0,1)` |
 | Modal | 160ms | `ease-out` |
 | Skeleton shimmer | 1400ms | `linear` |
 
@@ -559,7 +603,7 @@ Non-negotiable, applied per component.
 - Every interactive element has a visible focus state. `outline: none` without a replacement is a defect.
 - Status is never colour alone — always a dot with a label, or an icon.
 - Full keyboard operation. **The entire POS flow completes without a mouse.**
-- Focus trapped in modals and drawers, returned to the trigger on close.
+- Focus trapped in modals, returned to the trigger on close.
 - Tables use real `<table>` semantics with `<th scope>`; sort state announced via `aria-sort`.
 - Icon-only buttons carry `aria-label`.
 - Live regions announce async results — sale completed, payment resolved, sync finished.

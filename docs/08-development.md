@@ -53,17 +53,18 @@ Demo logins are printed by `seed_demo`.
 
 ### Environment
 
-Copy `.env.example` to `.env`. Never commit `.env`.
+Copy `.env.example` to `.env` and fill it in. **Never commit `.env`.**
 
 ```bash
-DJANGO_SECRET_KEY=...
-DJANGO_DEBUG=1
-DATABASE_URL=postgres://medix:medix@localhost:5432/medix
-REDIS_URL=redis://localhost:6379/0
-FISCAL_BACKEND=mock          # mock | vsdc
-PAYMENTS_BACKEND=mock        # mock | momo | airtel
-TIME_ZONE=Africa/Kigali
+cp .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(32))"   # one per secret
 ```
+
+`DJANGO_SECRET_KEY`, `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` have **no defaults**. Django refuses to start without them and Compose refuses to bring Postgres up.
+
+Database settings are given as **components, never a connection URI**. A URI embeds the password in one string — the shape that leaks, and the shape scanners flag. `DATABASE_URL` is still honoured if a host injects one as a real environment variable.
+
+Ports are `5442` for Postgres and `6380` for Redis rather than the defaults, because a machine may already run a native PostgreSQL. An ambiguous port lets Django silently reach the wrong database.
 
 `FISCAL_BACKEND=mock` and `PAYMENTS_BACKEND=mock` are the default for local work. **Never point a development environment at RRA production.** Use the RRA test VSDC in staging only.
 
