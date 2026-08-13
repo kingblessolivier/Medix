@@ -9,7 +9,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CircleCheck, List, PackageCheck, Send, Truck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   ApiFailure,
@@ -18,6 +18,7 @@ import {
   type OrderLine,
   type PurchaseOrder,
 } from "@/lib/api";
+import { DocumentChips } from "@/components/data/DocumentChips";
 import {
   DataTable,
   DataToolbar,
@@ -31,6 +32,8 @@ import {
   Banner,
   Button,
   ErrorState,
+  Field,
+  Input,
   PageHeader,
   StatusDot,
   StatusPill,
@@ -38,6 +41,7 @@ import {
 } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
 import { AlertStack } from "@/components/ui/AlertStack";
+import { Consequence, NextAction } from "@/components/ui/Guidance";
 import { OrderTimeline } from "./OrderTimeline";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
@@ -45,6 +49,11 @@ const DAY = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" })
 
 const STATUS: Record<string, { tone: Tone; label: string }> = {
   DRAFT: { tone: "neutral", label: "Draft" },
+  /* The buyer's own approval. Named for who is holding it rather than
+     for the state: "pending" tells a pharmacist nothing about who to
+     go and ask. */
+  PENDING_APPROVAL: { tone: "warn", label: "With the owner" },
+  REJECTED: { tone: "bad", label: "Sent back" },
   SUBMITTED: { tone: "warn", label: "Awaiting confirmation" },
   CONFIRMED: { tone: "info", label: "Confirmed" },
   PARTIALLY_DISPATCHED: { tone: "warn", label: "Part shipped" },
@@ -118,6 +127,7 @@ export function OrdersScreen({
   const [view, setView] = useState("all");
   const [filter, setFilter] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [rejecting, setRejecting] = useState<PurchaseOrder | null>(null);
   const [failure, setFailure] = useState("");
 
   const orders = useQuery({
@@ -152,6 +162,26 @@ export function OrdersScreen({
         if (raised.length === 0) setFailure(error.error.message);
       }
     },
+  });
+
+  const sendForApproval = useMutation({
+    mutationFn: (id: string) => api.requestApproval(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["orders"] }),
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Couldn't send for approval.",
+      ),
+  });
+
+  const reject = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.rejectOrder(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      setRejecting(null);
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Couldn't send back."),
   });
 
   const submit = useMutation({
@@ -212,11 +242,35 @@ export function OrdersScreen({
 
   const rowActions: RowAction<PurchaseOrder>[] = [
     { label: "Open", onSelect: setSelected },
-    {
-      label: side === "received" ? "Confirm order" : "Submit order",
-      onSelect: (o) => (side === "received" ? confirm.mutate(o.id) : submit.mutate(o.id)),
-      disabled: (o) => (side === "received" ? !confirmable(o) : o.status !== "DRAFT"),
-    },
+    ...(side === "received"
+      ? [
+          {
+            label: "Confirm order",
+            onSelect: (o: PurchaseOrder) => confirm.mutate(o.id),
+            disabled: (o: PurchaseOrder) => !confirmable(o),
+          },
+        ]
+      : [
+          /* Two steps, because they are two people. A pharmacist raises
+             the order and sends it; somebody who can commit the money
+             releases it to the depot. */
+          {
+            label: "Send for approval",
+            onSelect: (o: PurchaseOrder) => sendForApproval.mutate(o.id),
+            disabled: (o: PurchaseOrder) => o.status !== "DRAFT",
+          },
+          {
+            label: "Approve and send",
+            onSelect: (o: PurchaseOrder) => submit.mutate(o.id),
+            disabled: (o: PurchaseOrder) => o.status !== "PENDING_APPROVAL",
+          },
+          {
+            label: "Send back",
+            onSelect: (o: PurchaseOrder) => setRejecting(o),
+            disabled: (o: PurchaseOrder) => o.status !== "PENDING_APPROVAL",
+            danger: true,
+          },
+        ]),
     ...(side === "received"
       ? [
           {
@@ -265,6 +319,12 @@ export function OrdersScreen({
         return <StatusPill tone={s.tone}>{s.label}</StatusPill>;
       },
     },
+    {
+      key: "documents",
+      header: "Documents",
+      width: "11rem",
+      render: (o) => <DocumentChips subject={o.id} label={o.number || "Draft"} />,
+    },
   ];
 
   if (orders.isError) {
@@ -303,6 +363,14 @@ export function OrdersScreen({
         </Banner>
       )}
 
+      <WhatToDoNow
+        orders={visible}
+        side={side}
+        onSend={(o) => sendForApproval.mutate(o.id)}
+        onApprove={(o) => submit.mutate(o.id)}
+        onConfirm={(o) => confirm.mutate(o.id)}
+      />
+
       <TableTabs tabs={tabs} active={view} onChange={setView} />
 
       <DataToolbar
@@ -329,7 +397,7 @@ export function OrdersScreen({
           return (
             <Button
               variant="primary"
-              icon={<Check size={15} strokeWidth={2} />}
+              icon={<Check size={15} strokeWidth={2} aria-hidden />}
               disabled={ready.length === 0 || confirm.isPending}
               onClick={() => {
                 ready.forEach((o) => confirm.mutate(o.id));
@@ -365,8 +433,160 @@ export function OrdersScreen({
         busy={confirm.isPending || submit.isPending || dispatch.isPending}
         viewerOrganization={organizationId}
       />
+
+      <SendBackModal
+        order={rejecting}
+        busy={reject.isPending}
+        onClose={() => setRejecting(null)}
+        onSend={(reason) =>
+          rejecting && reject.mutate({ id: rejecting.id, reason })
+        }
+      />
     </>
   );
+}
+
+/* Sending an order back needs a reason the raiser can act on.
+ *
+ * Required rather than optional: an order returned with no explanation is
+ * an argument the pharmacist cannot answer, and they will simply send the
+ * same order again. */
+function SendBackModal({
+  order,
+  busy,
+  onClose,
+  onSend,
+}: {
+  order: PurchaseOrder | null;
+  busy: boolean;
+  onClose: () => void;
+  onSend: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+
+  useEffect(() => setReason(""), [order?.id]);
+  if (!order) return null;
+
+  return (
+    <Modal
+      open
+      title="Send back"
+      subtitle={order.supplier_name}
+      onClose={onClose}
+      footer={
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>
+            Keep waiting
+          </Button>
+          <Button
+            variant="primary"
+            className="flex-1"
+            loading={busy}
+            disabled={!reason.trim()}
+            onClick={() => onSend(reason)}
+          >
+            Send back
+          </Button>
+        </div>
+      }
+    >
+      <Consequence
+        lines={[
+          "Returns the order to the pharmacist who raised it.",
+          "The depot never sees it. Nothing is ordered.",
+        ]}
+      />
+      <div className="mt-4">
+        <Field label="Reason" required>
+          {(id) => (
+            <Input
+              id={id}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Too much stock"
+            />
+          )}
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
+/* A status says where the order is. It does not say what is now expected
+ * of the person reading it, and "Approved" is not an instruction.
+ *
+ * One line, one button, and only when there is something to do. A banner
+ * that is always present is a banner nobody reads. */
+function WhatToDoNow({
+  orders,
+  side,
+  onSend,
+  onApprove,
+  onConfirm,
+}: {
+  orders: PurchaseOrder[];
+  side: "placed" | "received";
+  onSend: (order: PurchaseOrder) => void;
+  onApprove: (order: PurchaseOrder) => void;
+  onConfirm: (order: PurchaseOrder) => void;
+}) {
+  if (side === "received") {
+    const waiting = orders.filter((o) => o.status === "SUBMITTED");
+    if (waiting.length === 0) return null;
+    return (
+      <NextAction
+        heading={`Confirm ${waiting.length} order${waiting.length === 1 ? "" : "s"}`}
+        detail="A pharmacy is waiting to hear whether you can supply."
+        action={
+          <Button variant="primary" onClick={() => onConfirm(waiting[0])}>
+            Confirm oldest
+          </Button>
+        }
+      />
+    );
+  }
+
+  const pending = orders.filter((o) => o.status === "PENDING_APPROVAL");
+  if (pending.length > 0) {
+    return (
+      <NextAction
+        heading={`Approve ${pending.length} order${pending.length === 1 ? "" : "s"}`}
+        detail="Nothing is sent to the depot until you release it."
+        action={
+          <Button variant="primary" onClick={() => onApprove(pending[0])}>
+            Open oldest
+          </Button>
+        }
+      />
+    );
+  }
+
+  const drafts = orders.filter((o) => o.status === "DRAFT" && o.lines.length > 0);
+  if (drafts.length > 0) {
+    return (
+      <NextAction
+        heading={`Send ${drafts.length} draft${drafts.length === 1 ? "" : "s"} for approval`}
+        detail="A draft sits here until somebody releases it."
+        action={
+          <Button variant="primary" onClick={() => onSend(drafts[0])}>
+            Send oldest
+          </Button>
+        }
+      />
+    );
+  }
+
+  const shipped = orders.filter((o) => o.status === "DISPATCHED");
+  if (shipped.length > 0) {
+    return (
+      <NextAction
+        tone="waiting"
+        heading={`${shipped.length} on the way`}
+        detail="Receive them under Deliveries when they arrive."
+      />
+    );
+  }
+  return null;
 }
 
 function SideToggle({
@@ -454,7 +674,7 @@ function OrderModal({
       <Button
         variant="primary"
         className="w-full"
-        icon={<PackageCheck size={16} strokeWidth={1.9} />}
+        icon={<PackageCheck size={16} strokeWidth={1.9} aria-hidden />}
         loading={busy}
         onClick={onDispatch}
       >
@@ -464,7 +684,7 @@ function OrderModal({
       <Button
         variant="primary"
         className="w-full"
-        icon={<Check size={16} strokeWidth={1.9} />}
+        icon={<Check size={16} strokeWidth={1.9} aria-hidden />}
         loading={busy}
         onClick={onConfirm}
       >
@@ -474,7 +694,7 @@ function OrderModal({
       <Button
         variant="primary"
         className="w-full"
-        icon={<Send size={16} strokeWidth={1.9} />}
+        icon={<Send size={16} strokeWidth={1.9} aria-hidden />}
         loading={busy}
         onClick={onSubmit}
       >

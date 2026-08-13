@@ -119,7 +119,7 @@ function Manufacturers() {
       <div className="mb-3 flex justify-end">
         <Button
           variant="primary"
-          icon={<Plus size={16} strokeWidth={1.9} />}
+          icon={<Plus size={16} strokeWidth={1.9} aria-hidden />}
           onClick={() => setAdding(true)}
         >
           Add manufacturer
@@ -258,7 +258,7 @@ function Categories() {
       <div className="mb-3 flex justify-end">
         <Button
           variant="primary"
-          icon={<Plus size={16} strokeWidth={1.9} />}
+          icon={<Plus size={16} strokeWidth={1.9} aria-hidden />}
           onClick={() => setAdding(true)}
         >
           Add category
@@ -347,7 +347,7 @@ function Thresholds() {
       <div className="mb-3 flex justify-end">
         <Button
           variant="primary"
-          icon={<Plus size={16} strokeWidth={1.9} />}
+          icon={<Plus size={16} strokeWidth={1.9} aria-hidden />}
           onClick={() => setAdding(true)}
         >
           Supersede a threshold

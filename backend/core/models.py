@@ -426,3 +426,8 @@ class ControlledQuota(TenantModel):
 
     def __str__(self) -> str:
         return f"{self.schedule} {self.limit_base} per {self.get_period_display().lower()}"
+
+
+# The agent's models, declared here for the same reason as the alert
+# tables above: registration must not depend on import order.
+from core.sync import Device, SyncEnvelope  # noqa: E402,F401

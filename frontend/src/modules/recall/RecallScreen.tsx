@@ -110,7 +110,7 @@ export function RecallScreen() {
               icon={Search}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Batch number or product"
+              placeholder="Batch or product"
             />
           )}
         </Field>
@@ -186,7 +186,7 @@ function TraceModal({
           <Button
             variant="danger"
             className="w-full"
-            icon={<TriangleAlert size={16} strokeWidth={1.9} />}
+            icon={<TriangleAlert size={16} strokeWidth={1.9} aria-hidden />}
             onClick={() => setConfirming(true)}
           >
             Recall this batch
@@ -211,7 +211,7 @@ function TraceModal({
       ) : !found ? null : (
         <>
           <div className="mb-5 grid gap-3 sm:grid-cols-3">
-            <Figure label="On our shelves" value={found.on_hand_base.toLocaleString()} />
+            <Figure label="On shelf" value={found.on_hand_base.toLocaleString()} />
             <Figure
               label="Dispensed to patients"
               value={found.dispensed_base.toLocaleString()}

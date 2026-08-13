@@ -12,6 +12,8 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
 from rest_framework.permissions import IsAuthenticated
+
+from core.permissions import TenantScoped
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -521,7 +523,7 @@ class SaleReturnView(APIView):
     `inventory.movements.sale_return`.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def post(self, request):
         from inventory import movements

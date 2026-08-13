@@ -5,6 +5,8 @@ from __future__ import annotations
 from rest_framework import mixins, status, viewsets
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
+
+from core.permissions import TenantScoped
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -140,7 +142,7 @@ class PeriodReportView(APIView):
     total behind. See docs/28 §12.1.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         query = PeriodQuerySerializer(data=request.query_params)
@@ -163,7 +165,7 @@ class DashboardView(APIView):
     would let them disagree with each other while a query was in flight.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         query = PeriodQuerySerializer(data=request.query_params)
@@ -188,7 +190,7 @@ class IntelligenceView(APIView):
     not have them.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         from datetime import date
@@ -207,7 +209,7 @@ class IntelligenceView(APIView):
 
 
 class ReceivablesView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         return Response(

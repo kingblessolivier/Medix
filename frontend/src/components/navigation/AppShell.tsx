@@ -13,7 +13,6 @@ import {
   Building2,
   ChartNoAxesCombined,
   ClipboardList,
-  FileText,
   HeartPulse,
   LayoutDashboard,
   Lightbulb,
@@ -60,21 +59,21 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   // A depot's fulfilment queue. Gated on publishing rather than on
   // DISTRIBUTE: if you can offer stock you have orders to pick.
   if (can("PUBLISH_LISTINGS")) {
-    operations.push({ id: "distribution", label: "Distribution", icon: Truck });
+    operations.push({ id: "distribution", label: "Orders to fill", icon: Truck });
   }
 
   const commerce: NavItem[] = [
     { id: "marketplace", label: "Marketplace", icon: Store },
     { id: "orders", label: "Orders", icon: ShoppingCart },
-    { id: "receiving", label: "Receiving", icon: PackageCheck },
+    { id: "receiving", label: "Deliveries", icon: PackageCheck },
   ];
   // Only a depot imports. A retail pharmacy receives against an order it
   // placed; it does not clear a consignment through customs.
   if (can("PUBLISH_LISTINGS")) {
-    commerce.push({ id: "import", label: "Import receipt", icon: PackagePlus });
+    commerce.push({ id: "import", label: "Imports", icon: PackagePlus });
     // Admission to the network is an act one organization performs on
     // another, so it sits with the depot's other commercial work.
-    commerce.push({ id: "pharmacies", label: "Pharmacies", icon: Building2 });
+    commerce.push({ id: "pharmacies", label: "Customers", icon: Building2 });
   }
 
   const groups: NavGroup[] = [
@@ -112,9 +111,8 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
     label: "Reporting",
     items: [
       { id: "analytics", label: "Performance", icon: ChartNoAxesCombined },
-      { id: "intelligence", label: "Intelligence", icon: Lightbulb },
+      { id: "intelligence", label: "Insights", icon: Lightbulb },
       { id: "finance", label: "Finance", icon: Wallet },
-      { id: "documents", label: "Documents", icon: FileText },
     ],
   });
   return groups;
@@ -273,7 +271,7 @@ function TopBar({
         onClick={onSearch}
         className="flex h-8 w-full max-w-[420px] items-center gap-2 rounded-md bg-hover px-3 text-left text-body text-text-3 transition-colors hover:ring-1 hover:ring-border"
       >
-        <Search size={15} strokeWidth={1.8} />
+        <Search size={15} strokeWidth={1.8} aria-hidden />
         <span>Search products, orders, batches…</span>
         <kbd className="ml-auto font-sans text-help">⌘K</kbd>
       </button>
@@ -323,7 +321,7 @@ function ThemeToggle() {
       aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
       className="text-text-2 hover:text-text"
     >
-      {dark ? <Sun size={17} strokeWidth={1.8} /> : <Moon size={17} strokeWidth={1.8} />}
+      {dark ? <Sun size={17} strokeWidth={1.8} aria-hidden /> : <Moon size={17} strokeWidth={1.8} aria-hidden />}
     </button>
   );
 }

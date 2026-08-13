@@ -17,7 +17,6 @@ import { ProductEditor } from "@/modules/catalogue/ProductEditor";
 import { ComplianceScreen } from "@/modules/compliance/ComplianceScreen";
 import { DistributionScreen } from "@/modules/distribution/DistributionScreen";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
-import { DocumentsScreen } from "@/modules/documents/DocumentsScreen";
 import { FinanceScreen } from "@/modules/finance/FinanceScreen";
 import { ClaimsScreen } from "@/modules/insurance/ClaimsScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
@@ -142,8 +141,6 @@ export default function App() {
           <PerformanceScreen canSupply={canSupply} />
         ) : active === "finance" ? (
           <FinanceScreen />
-        ) : active === "documents" ? (
-          <DocumentsScreen />
         ) : active === "distribution" && canSupply ? (
           <DistributionScreen
             locationId={mainLocation ?? null}

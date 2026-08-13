@@ -112,7 +112,7 @@ export function PharmaciesScreen() {
         actions={
           <Button
             variant="primary"
-            icon={<Plus size={16} strokeWidth={1.9} />}
+            icon={<Plus size={16} strokeWidth={1.9} aria-hidden />}
             onClick={() => setRegistering(true)}
           >
             Register pharmacy
@@ -407,7 +407,7 @@ function CredentialsModal({
 
       <Button
         className="mt-4 w-full"
-        icon={<Copy size={16} strokeWidth={1.9} />}
+        icon={<Copy size={16} strokeWidth={1.9} aria-hidden />}
         onClick={() => {
           navigator.clipboard?.writeText(
             `${result.administrator.username} / ${result.temporary_password}`,

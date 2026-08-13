@@ -63,7 +63,7 @@ export function FinanceScreen() {
           tab === "expenses" ? (
             <Button
               variant="primary"
-              icon={<Plus size={16} strokeWidth={1.9} />}
+              icon={<Plus size={16} strokeWidth={1.9} aria-hidden />}
               onClick={() => setAdding(true)}
             >
               Record expense

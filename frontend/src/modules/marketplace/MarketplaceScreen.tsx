@@ -25,6 +25,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { ApiFailure, api, type MarketplaceRow } from "@/lib/api";
+import { ProductImage } from "@/components/data/ProductImage";
 import {
   DataTable,
   DataToolbar,
@@ -47,8 +48,17 @@ import {
   type Tone,
 } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
+import { Help } from "@/components/ui/Guidance";
 
 const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
+
+/* A listing can say "Available" and have nothing behind it: the depot
+   published the product but allocated no stock to it, or the allocation
+   has been consumed by other pharmacies. Ordering then fails at the
+   server with "0 box available", after the buyer has chosen a quantity
+   and pressed the button — so the truth is told on the row instead. */
+const soldOut = (row: MarketplaceRow) =>
+  row.availability === "AVAILABLE_NOW" && row.available_base <= 0;
 
 const AVAILABILITY: Record<string, { tone: Tone; label: string }> = {
   AVAILABLE_NOW: { tone: "ok", label: "Available" },
@@ -125,11 +135,24 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
       header: "Product",
       sortable: true,
       render: (r) => (
-        <span className="flex items-center gap-1.5">
-          {r.product_name}
-          {r.cold_chain && (
-            <Snowflake size={13} strokeWidth={1.8} className="text-brand" aria-label="Cold chain" />
-          )}
+        <span className="flex items-center gap-2">
+          <ProductImage src={r.image} alt={r.image_alt} coldChain={r.cold_chain} />
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5 truncate">
+              {r.product_name}
+              {r.cold_chain && (
+                <Snowflake
+                  size={13}
+                  strokeWidth={1.8}
+                  className="shrink-0 text-brand"
+                  aria-label="Cold chain"
+                />
+              )}
+            </span>
+            {/* The pack is half the identity. "Amoxicillin 500mg" is not
+                orderable information until you know it is a box of 30. */}
+            <span className="block truncate text-help text-text-3">{r.pack_size}</span>
+          </span>
         </span>
       ),
       sortValue: (r) => r.product_name,
@@ -164,6 +187,7 @@ export function MarketplaceScreen({ locationId }: { locationId: string | null })
       key: "status",
       header: "Status",
       render: (r) => {
+        if (soldOut(r)) return <StatusPill tone="neutral">None left</StatusPill>;
         const state = AVAILABILITY[r.availability] ?? AVAILABILITY.NOT_IN_COUNTRY;
         return <StatusPill tone={state.tone}>{state.label}</StatusPill>;
       },
@@ -341,29 +365,34 @@ function CardGrid({
             onClick={() => onSelect(row)}
             className="overflow-hidden rounded-md border border-border bg-surface text-left transition-colors hover:border-brand"
           >
-            <div className="flex h-[74px] items-center justify-center border-b border-hair bg-content text-help tracking-wide text-text-3">
-              {row.cold_chain ? (
-                <Snowflake size={20} strokeWidth={1.5} className="text-brand" />
-              ) : (
-                "PRODUCT IMAGE"
-              )}
-            </div>
+            <ProductImage
+              src={row.image}
+              alt={row.image_alt}
+              size="card"
+              coldChain={row.cold_chain}
+            />
 
             <div className="px-2.5 pb-2.5 pt-2">
               <p className="truncate text-body font-semibold leading-tight">{row.product_name}</p>
               {/* Form and strength identify the product; the supplier is
                   secondary when you are still deciding what to buy. */}
-              <p className="truncate text-help text-text-2">
-                {[row.dosage_form, row.brand || row.category_name].filter(Boolean).join(" · ")}
+              <p className="truncate text-help text-text-2">{row.pack_size}</p>
+              <p className="truncate text-help text-text-3">
+                {[row.manufacturer_name || row.brand, row.vendor_name]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
-              <p className="truncate text-help text-text-3">{row.vendor_name}</p>
 
               <div className="mt-2 flex items-baseline justify-between">
                 <span className="tabular text-body font-semibold">
                   {row.is_orderable ? CURRENCY.format(row.price) : "—"}
                 </span>
                 <span className="text-help text-text-2">
-                  {row.is_orderable ? `${row.available_base.toLocaleString()} left` : state.label}
+                  {soldOut(row)
+                    ? "None left"
+                    : row.is_orderable
+                      ? `${row.available_base.toLocaleString()} left`
+                      : state.label}
                 </span>
               </div>
 
@@ -372,7 +401,7 @@ function CardGrid({
               )}
 
               <span className="mt-2 block w-full rounded-sm border border-border py-1 text-center text-help font-semibold">
-                {row.is_orderable ? "Compare" : "Request import"}
+                {soldOut(row) ? "None left" : row.is_orderable ? "Compare" : "Request import"}
               </span>
             </div>
           </button>
@@ -438,16 +467,23 @@ function CompareModal({
   const state = AVAILABILITY[row.availability] ?? AVAILABILITY.NOT_IN_COUNTRY;
   const count = Number(quantity);
   const chosen = row.units.find((u) => u.code === unitCode) ?? row.units[0];
-  const valid =
-    Number.isInteger(count) && count > 0 && Boolean(locationId) && Boolean(chosen);
-
   // Both the running total and what the depot has left are quoted in the
   // unit the buyer picked. Showing a carton count against a pack total is
   // how an order for a twelfth of the intended amount looks correct.
-  const lineTotal = chosen ? chosen.price * (valid ? count : 0) : 0;
   const availableInUnit = chosen
     ? Math.floor(row.available_base / chosen.factor_to_base)
     : 0;
+  // Checked here as well as by the server: the server is the authority,
+  // but discovering the refusal after choosing a quantity and pressing
+  // the button is a worse way to learn it.
+  const valid =
+    Number.isInteger(count) &&
+    count > 0 &&
+    Boolean(locationId) &&
+    Boolean(chosen) &&
+    !soldOut(row) &&
+    count <= availableInUnit;
+  const lineTotal = chosen ? chosen.price * (valid ? count : 0) : 0;
 
   // Volume thresholds are quoted in the depot's own unit, so the buyer's
   // quantity converts down before comparing — two cartons must qualify
@@ -507,7 +543,7 @@ function CompareModal({
             <Button
               variant="primary"
               className="flex-1"
-              icon={<Plus size={16} strokeWidth={2} />}
+              icon={<Plus size={16} strokeWidth={2} aria-hidden />}
               loading={add.isPending}
               disabled={!valid}
               onClick={() => add.mutate()}
@@ -519,17 +555,42 @@ function CompareModal({
           <Button
             variant="secondary"
             className="w-full"
-            icon={<Plane size={16} strokeWidth={1.8} />}
+            icon={<Plane size={16} strokeWidth={1.8} aria-hidden />}
           >
             Request import
           </Button>
         )
       }
     >
-      <div className="mb-4 flex flex-wrap gap-2">
-        <StatusDot tone={state.tone}>{state.label}</StatusDot>
-        {row.requires_prescription && <Badge tone="warn">Prescription only</Badge>}
-        {row.cold_chain && <Badge tone="brand">Cold chain</Badge>}
+      {/* Picture and identity together. The buyer checks the artwork
+          against the box they stock, then checks the numbers underneath
+          it — the picture alone has never been enough to order on. */}
+      <div className="mb-4 flex gap-4">
+        <ProductImage
+          src={row.image}
+          alt={row.image_alt}
+          size="detail"
+          coldChain={row.cold_chain}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-body text-text">{row.pack_size}</p>
+          <p className="text-help text-text-2">
+            {[row.manufacturer_name, row.dosage_form].filter(Boolean).join(" · ") || "—"}
+          </p>
+          {row.gtin && (
+            <p className="mt-1 font-mono text-help text-text-3">{row.gtin}</p>
+          )}
+          {row.registration_number && (
+            <p className="font-mono text-help text-text-3">
+              {row.registration_number}
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <StatusDot tone={state.tone}>{state.label}</StatusDot>
+            {row.requires_prescription && <Badge tone="warn">Prescription only</Badge>}
+            {row.cold_chain && <Badge tone="brand">Cold chain</Badge>}
+          </div>
+        </div>
       </div>
 
       {added && (
@@ -549,6 +610,7 @@ function CompareModal({
           ["Category", row.category_name ?? "—"],
           ["Form", row.dosage_form || "—"],
           ["Brand", row.brand || "—"],
+          ["Manufacturer", row.manufacturer_name ?? "—"],
           ["Supplier", row.vendor_name],
           ["Minimum order", row.moq.toLocaleString()],
           ["Lead time", `${row.lead_time_days} day${row.lead_time_days === 1 ? "" : "s"}`],
@@ -557,7 +619,15 @@ function CompareModal({
             chosen ? CURRENCY.format(chosen.price) : "—",
           ],
           [
-            "Available",
+            /* The word does not mean what a pharmacist assumes. It is
+               what this depot published, less what other pharmacies have
+               already committed — not what is on its shelves. */
+            (
+              <Help term="Available">
+                What you can order now. Not the depot's stock: it excludes what
+                other pharmacies have already committed to.
+              </Help>
+            ) as unknown as string,
             row.is_orderable
               ? `${availableInUnit.toLocaleString()} ${chosen?.code.toLowerCase() ?? ""}`
               : "—",

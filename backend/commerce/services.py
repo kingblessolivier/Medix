@@ -541,21 +541,41 @@ def reopen_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
     return _transition(order, to_status=PurchaseOrderStatus.DRAFT, actor=performed_by)
 
 
-def _assert_internal_approver(order: PurchaseOrder, user: User) -> None:
-    """Separation of duties, as far as the current model allows.
+def _assert_internal_approver(order: PurchaseOrder, user: User) -> bool:
+    """Separation of duties, where there is anybody to separate from.
 
     The approver must belong to the buying pharmacy and must not be the
     person who raised the order — self-approval defeats the control
     entirely.
 
-    This is a weaker check than it should be: there is no role model yet,
+    Except where the pharmacy is one person. A great many Rwandan retail
+    pharmacies are a single registered pharmacist who is also the owner,
+    and refusing them outright does not produce a second approver: it
+    produces a second login sharing one keyboard, which is the same risk
+    with the audit trail switched off. So where no colleague exists the
+    approval proceeds and is **recorded as self-approved**, and the
+    control returns the moment a second account is created.
+
+    Returns whether a second person actually approved it, so the caller
+    can say so on the record.
+
+    This is still weaker than it should be: there is no role model yet,
     so any second colleague can release an order. A proper
     APPROVE_PURCHASE permission belongs here once roles exist.
     """
     if user.organization_id != order.organization_id:
         raise DomainError("Only the buying pharmacy can approve.", code="not_buyer")
-    if order.created_by_id and order.created_by_id == user.id:
+    if not order.created_by_id or order.created_by_id != user.id:
+        return True
+
+    colleagues = (
+        User.objects.filter(organization_id=order.organization_id, is_active=True)
+        .exclude(pk=user.pk)
+        .exists()
+    )
+    if colleagues:
         raise NotApprover("An order cannot be approved by the person who raised it.")
+    return False
 
 
 @transaction.atomic
@@ -568,7 +588,7 @@ def submit_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
         raise DomainError("This order is not awaiting approval.", code="order_not_pending")
     if not order.lines.exists():
         raise DomainError("Add a product before submitting.", code="order_empty")
-    _assert_internal_approver(order, performed_by)
+    second_pair_of_eyes = _assert_internal_approver(order, performed_by)
 
     relationship = TradingRelationship.objects.filter(
         organization=order.supplier, customer=order.organization, is_active=True
@@ -588,6 +608,9 @@ def submit_order(*, order: PurchaseOrder, performed_by: User) -> PurchaseOrder:
         to_status=PurchaseOrderStatus.SUBMITTED,
         actor=performed_by,
         document_number=order.number,
+        # Said plainly on the event rather than inferred later by
+        # comparing two user ids in the audit stream.
+        note="" if second_pair_of_eyes else "Self-approved: sole user of this pharmacy.",
         extra_fields=["number", "submitted_at", "approved_by", "approved_at"],
     )
 

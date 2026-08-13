@@ -171,7 +171,7 @@ export function PerformanceScreen({ canSupply }: { canSupply: boolean }) {
           {/* The one chart where the status ramp is correct rather than
               reserved: safe, slow-moving and expiring are statuses. */}
           <Chart.Bar
-            title="Stock value and expiry risk"
+            title="Stock health"
             data={inventory_health}
             categoryKey="band"
             stacked

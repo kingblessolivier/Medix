@@ -114,7 +114,7 @@ function Categories({ data }: { data: IntelligenceReport }) {
           nothing, which is what lets this show more than four rows. */}
       <div className="mb-4">
         <Chart.Bar
-          title="Gross profit by category"
+          title="Profit by category"
           data={data.by_category.slice(0, 8).map((r) => ({
             category: r.label,
             profit: r.gross_profit,

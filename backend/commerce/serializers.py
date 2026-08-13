@@ -65,6 +65,47 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
 
     units = serializers.SerializerMethodField()
 
+    # Identification a buyer can check against the box in their hand. The
+    # picture is verification, not decoration — and it is never the only
+    # identifier, so the manufacturer and the barcode travel with it.
+    image = serializers.SerializerMethodField()
+    image_alt = serializers.SerializerMethodField()
+    manufacturer_name = serializers.CharField(
+        source="product.manufacturer.name", read_only=True, default=None
+    )
+    gtin = serializers.CharField(source="product.gtin", read_only=True)
+    registration_number = serializers.CharField(
+        source="product.registration.registration_number", read_only=True, default=None
+    )
+    pack_size = serializers.SerializerMethodField()
+
+    def _primary_image(self, listing):
+        """The primary image, else the first. Prefetched, so no per-row query."""
+        images = list(listing.product.images.all())
+        if not images:
+            return None
+        return next((image for image in images if image.is_primary), images[0])
+
+    def get_image(self, listing) -> str | None:
+        image = self._primary_image(listing)
+        if image is None:
+            return None
+        request = self.context.get("request")
+        url = image.image.url
+        return request.build_absolute_uri(url) if request else url
+
+    def get_image_alt(self, listing) -> str:
+        image = self._primary_image(listing)
+        return image.alt if image else ""
+
+    def get_pack_size(self, listing) -> str:
+        """"Box of 30" — how the pack is spoken about, not a factor."""
+        priced = listing.price_uom
+        base = listing.product.units.filter(is_base=True).first()
+        if base is None or priced.id == base.id:
+            return priced.name
+        return f"{priced.name} — {priced.factor_to_base} {base.name.lower()}"
+
     def get_units(self, listing) -> list[dict]:
         """Levels this depot will sell at, priced.
 
@@ -121,6 +162,12 @@ class MarketplaceRowSerializer(serializers.ModelSerializer):
             "product_type_code",
             "dosage_form",
             "units",
+            "image",
+            "image_alt",
+            "manufacturer_name",
+            "gtin",
+            "registration_number",
+            "pack_size",
             "vendor",
             "vendor_name",
             "availability",

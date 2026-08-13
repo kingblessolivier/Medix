@@ -787,7 +787,7 @@ class TestDispatch:
         assert line.dispatched_base == 1000
         assert line.undispatched_base == 1000
         assert order.status == PurchaseOrderStatus.PARTIALLY_DISPATCHED
-        assert sum(l.quantity_base for l in shipment.lines.all()) == 1000
+        assert sum(line.quantity_base for line in shipment.lines.all()) == 1000
 
     def test_full_dispatch_closes_the_order(self, market):
         order = self._confirmed_order(market, quantity=20)
@@ -1008,6 +1008,37 @@ class TestApprovalChain:
         with pytest.raises(services.NotApprover):
             services.submit_order(order=order, performed_by=market["buyer"])
 
+    def test_a_sole_pharmacist_can_still_order(self, market):
+        """One person is most Rwandan retail pharmacies.
+
+        Refusing them outright does not produce a second approver — it
+        produces a second login sharing one keyboard, which is the same
+        risk with the audit trail switched off.
+        """
+        order = self._pending(market)
+        User.objects.filter(organization=market["retail"]).exclude(
+            pk=market["buyer"].pk
+        ).update(is_active=False)
+
+        released = services.submit_order(order=order, performed_by=market["buyer"])
+        assert released.status == PurchaseOrderStatus.SUBMITTED
+
+    def test_self_approval_says_so_on_the_record(self, market):
+        order = self._pending(market)
+        User.objects.filter(organization=market["retail"]).exclude(
+            pk=market["buyer"].pk
+        ).update(is_active=False)
+        services.submit_order(order=order, performed_by=market["buyer"])
+
+        event = order.events.filter(to_status=PurchaseOrderStatus.SUBMITTED).first()
+        assert "Self-approved" in event.note
+
+    def test_the_control_returns_when_a_colleague_exists(self, market):
+        """Hiring somebody restores it, with no setting to remember."""
+        order = self._pending(market)
+        with pytest.raises(services.NotApprover):
+            services.submit_order(order=order, performed_by=market["buyer"])
+
     def test_a_colleague_releases_it(self, market):
         order = self._pending(market)
         released = services.submit_order(order=order, performed_by=market["owner"])
@@ -1144,7 +1175,7 @@ class TestOrderUnits:
         )
         order.refresh_from_db()
         assert order.lines.count() == 2
-        assert {l.uom.code for l in order.lines.all()} == {"CARTON", "PACK"}
+        assert {line.uom.code for line in order.lines.all()} == {"CARTON", "PACK"}
         assert order.subtotal == (28000 * 12) + (28000 * 3)
 
     def test_same_unit_twice_merges(self, market):

@@ -134,6 +134,21 @@ def _invoices(organization: Organization, term: str) -> list[Hit]:
     ]
 
 
+#: Where a document takes you. There is no document screen — a document
+#: is an output of an operation and lives on that operation's row, so a
+#: search hit navigates to the work rather than to a filing cabinet.
+#: See docs/19-screens.md.
+DOCUMENT_SCREENS = {
+    "commerce.Shipment": "distribution",
+    "commerce.PurchaseOrder": "orders",
+    "commerce.Invoice": "finance",
+    "commerce.GoodsReceipt": "receiving",
+    "commerce.ControlledTransfer": "compliance",
+    "finance.WriteOff": "finance",
+    "insurance.Claim": "claims",
+}
+
+
 def _documents(organization: Organization, term: str) -> list[Hit]:
     from documents.models import Document
 
@@ -146,7 +161,7 @@ def _documents(organization: Organization, term: str) -> list[Hit]:
             id=str(row.id),
             title=row.number,
             subtitle=row.get_kind_display(),
-            screen="documents",
+            screen=DOCUMENT_SCREENS.get(row.subject_type, "orders"),
         )
         for row in rows
     ]

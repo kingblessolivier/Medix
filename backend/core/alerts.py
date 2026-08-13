@@ -99,6 +99,14 @@ DEFAULTS: dict[str, dict] = {
     "REGISTRATION_EXPIRED": {"severity": Severity.CRITICAL, "threshold": {}},
     "REGISTRATION_EXPIRING": {"severity": Severity.WARNING, "threshold": {"days": 60}},
     "LICENCE_EXPIRING": {"severity": Severity.WARNING, "threshold": {"days": 60}},
+    # Minutes out of range before it is a fault rather than a door.
+    "COLD_CHAIN_EXCURSION": {
+        "severity": Severity.CRITICAL,
+        "threshold": {"minutes": 30},
+    },
+    # Silence is not safety: a probe that stopped reporting is a
+    # fridge nobody is watching.
+    "SENSOR_SILENT": {"severity": Severity.WARNING, "threshold": {"hours": 2}},
     "LICENCE_EXPIRED": {"severity": Severity.CRITICAL, "threshold": {}},
     "LICENCE_INVALID": {"severity": Severity.CRITICAL, "threshold": {}},
     "PHARMACIST_REGISTRATION_EXPIRING": {

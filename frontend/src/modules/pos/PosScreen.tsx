@@ -147,12 +147,13 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
           {/* Scanner-first: this field holds focus, and a GS1 scan lands
               here as keystrokes. */}
           <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-surface px-3">
-            <ScanBarcode size={18} strokeWidth={1.8} className="text-text-2" />
+            <ScanBarcode size={18} strokeWidth={1.8} className="text-text-2" aria-hidden />
             <input
               ref={searchRef}
+              aria-label="Scan or search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search product or scan barcode…"
+              placeholder="Product or barcode…"
               disabled={!isDraft}
               autoFocus
               className="h-11 w-full bg-transparent text-body text-text placeholder:text-text-3 focus:outline-none disabled:cursor-not-allowed"
@@ -195,7 +196,7 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
         <aside className="flex flex-col gap-3">
           {blocked && (
             <div className="flex items-start gap-2 border-l-2 border-bad bg-bad-bg px-3 py-2.5">
-              <ShieldAlert size={16} strokeWidth={1.8} className="mt-0.5 shrink-0 text-bad" />
+              <ShieldAlert size={16} strokeWidth={1.8} className="mt-0.5 shrink-0 text-bad" aria-hidden />
               <div>
                 <p className="text-body font-medium text-bad-text">{blocked}</p>
                 <button type="button" className="mt-1 text-help text-brand underline">
@@ -236,7 +237,7 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
                   the pair was checked and found safe. */}
               {review.data.interaction_notice && (
                 <p className="flex items-start gap-1.5 text-help text-text-3">
-                  <Info size={13} strokeWidth={1.9} className="mt-0.5 shrink-0" />
+                  <Info size={13} strokeWidth={1.9} className="mt-0.5 shrink-0" aria-hidden />
                   {review.data.interaction_notice}
                 </p>
               )}
@@ -332,7 +333,7 @@ function Line({ line }: { line: SaleLine }) {
       </div>
       <span className="tabular text-body font-medium">{money(line.line_total)}</span>
       <button type="button" aria-label="Remove" className="text-text-3 hover:text-bad">
-        <Trash2 size={15} strokeWidth={1.8} />
+        <Trash2 size={15} strokeWidth={1.8} aria-hidden />
       </button>
     </div>
   );
@@ -363,7 +364,7 @@ function PaymentPanel({
         /* Honest about the state: the customer is confirming on their
            handset and the money is not in the drawer yet. */
         <div className="flex items-center gap-2 border-l-2 border-warn bg-warn-bg px-3 py-2.5">
-          <Loader2 size={15} strokeWidth={1.8} className="animate-spin text-warn" />
+          <Loader2 size={15} strokeWidth={1.8} className="animate-spin text-warn" aria-hidden />
           <span className="text-body text-warn-text">Awaiting confirmation</span>
         </div>
       )}

@@ -8,6 +8,8 @@ from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
+
+from core.permissions import TenantScoped
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -108,7 +110,7 @@ class EligibilityView(APIView):
     conversations at the counter.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         from sales.models import Patient
@@ -135,7 +137,7 @@ class SaleCoverView(APIView):
     than the full amount.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request, sale_id):
         from sales.models import Sale
@@ -274,7 +276,7 @@ class SchemeReceivablesView(APIView):
     hiding work that could still recover the money.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         return Response(
@@ -285,7 +287,7 @@ class SchemeReceivablesView(APIView):
 class CapitationUtilisationView(APIView):
     """Dispensed against paid, for a capitation contract."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request, contract_id):
         contract = get_object_or_404(SchemeContract.tenant_objects, pk=contract_id)

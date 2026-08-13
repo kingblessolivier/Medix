@@ -107,7 +107,7 @@ export function PrescriptionsScreen() {
         actions={
           <Button
             variant="primary"
-            icon={<Plus size={16} strokeWidth={1.9} />}
+            icon={<Plus size={16} strokeWidth={1.9} aria-hidden />}
             onClick={() => setRaising(true)}
           >
             Raise prescription
@@ -173,7 +173,7 @@ function PrescriptionModal({
           <Button
             variant="primary"
             className="w-full"
-            icon={<Check size={16} strokeWidth={1.9} />}
+            icon={<Check size={16} strokeWidth={1.9} aria-hidden />}
             loading={verify.isPending}
             onClick={() => verify.mutate()}
           >

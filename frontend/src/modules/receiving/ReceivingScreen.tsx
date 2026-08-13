@@ -25,6 +25,7 @@ import {
   type PurchaseOrder,
 } from "@/lib/api";
 import { DataTable, type Column, type Density } from "@/components/data/DataTable";
+import { DocumentChips } from "@/components/data/DocumentChips";
 import {
   Badge,
   Banner,
@@ -116,6 +117,12 @@ function AwaitingDelivery({ onReceive }: { onReceive: (order: PurchaseOrder) => 
         ) : (
           <StatusPill tone="info">Confirmed</StatusPill>
         ),
+    },
+    {
+      key: "documents",
+      header: "Documents",
+      width: "11rem",
+      render: (o) => <DocumentChips subject={o.id} label={o.number} />,
     },
   ];
 
@@ -306,7 +313,7 @@ function ReceiveAgainstOrder({
       render: ({ line, entry }) => (
         <Input
           aria-label={`Batch number, ${line.product_name}`}
-          placeholder="Batch no."
+          placeholder="Batch number"
           value={entry.batch}
           onChange={(e) => update(line.id, { batch: e.target.value })}
           invalid={Number(entry.received) > 0 && !entry.batch.trim()}
@@ -374,7 +381,7 @@ function ReceiveAgainstOrder({
             </Button>
             <Button
               variant="primary"
-              icon={<PackageCheck size={16} strokeWidth={1.9} />}
+              icon={<PackageCheck size={16} strokeWidth={1.9} aria-hidden />}
               loading={post.isPending}
               disabled={!ready}
               onClick={() => post.mutate()}

@@ -107,7 +107,7 @@ export function Modal({
             aria-label="Close"
             className="shrink-0 rounded-sm p-1 text-text-2 hover:bg-hover hover:text-text"
           >
-            <X size={17} strokeWidth={1.8} />
+            <X size={17} strokeWidth={1.8} aria-hidden />
           </button>
         </header>
 

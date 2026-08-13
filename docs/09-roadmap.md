@@ -125,12 +125,15 @@ money received.
 
 ## Phase 6 — Compliance and cold chain
 
-**Built**, except the sensor half. Licence and registration expiry
-alerting, the compliance dashboard, automatic quarantine on a recorded
-cold-chain breach, the recall console with per-location execution and
-full trace, witnessed disposal with a certificate, and GS1 DataMatrix
-parsing all exist. What remains is live temperature capture from a
-device, which needs the local agent.
+**Built.** Licence and registration expiry alerting, the compliance
+dashboard, the recall console with per-location execution and full
+trace, witnessed disposal with a certificate, and GS1 DataMatrix parsing
+all exist — and so, now, does the sensor half: registered probes, an
+append-only reading log, excursion detection with a grace window that
+tells a door being opened from a fault, and automatic quarantine of
+cold-chain stock in the affected location. Recovery closes the excursion
+and does **not** release the stock; whether a batch is still safe is a
+pharmacist's judgement, recorded with a reason.
 
 - Premises licences and pharmacist registrations with expiry alerting
 - Compliance dashboard
@@ -165,9 +168,25 @@ alerting and the accounting export remain.
 
 ## Phase 8 — Assistant and polish
 
-**Partly built:** the command palette and global search across products,
-batches, orders, invoices, documents, pharmacies and patients. The
-Assistant, the copy pass and the accessibility audit remain.
+**Built.** The command palette and global search, the Assistant, the
+copy pass and the accessibility audit.
+
+The Assistant is deliberately not a language model. A pharmacist asking
+"which batches expire in 60 days" needs the right rows, and a system
+that answers plausibly when it does not know is worse here than one that
+says it does not know. So it is a small explicit grammar over service
+functions that are already tested: eleven intents, a search fallback,
+and three refusals — no clinical advice at any confidence, no figure
+called "net profit", and nothing that moves stock, money or a regulated
+record without a person confirming it. That last one is enforced by
+shape rather than discipline: `ask()` has no path to a service that
+writes, and `confirm()` only runs a whitelisted action from a stored
+proposal that expires.
+
+The copy and accessibility passes are scripts rather than a one-off
+review — `scripts/validate-copy.mjs` counts the docs/23 limits and
+`scripts/validate-a11y.mjs` catches the unnamed control and the
+mouse-only row, both under `npm run check`, so neither can drift back.
 
 - Command palette with actions
 - Global search across products, orders, invoices, patients, prescriptions, suppliers, batches, documents

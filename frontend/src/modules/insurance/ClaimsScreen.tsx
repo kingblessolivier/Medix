@@ -239,7 +239,7 @@ function ClaimModal({ claim, onClose }: { claim: Claim | null; onClose: () => vo
           <Button
             variant="primary"
             className="w-full"
-            icon={<Send size={16} strokeWidth={1.9} />}
+            icon={<Send size={16} strokeWidth={1.9} aria-hidden />}
             loading={submit.isPending}
             onClick={() => submit.mutate()}
           >
@@ -318,7 +318,7 @@ function ClaimModal({ claim, onClose }: { claim: Claim | null; onClose: () => vo
             </Field>
             <Button
               variant="primary"
-              icon={<Check size={16} strokeWidth={1.9} />}
+              icon={<Check size={16} strokeWidth={1.9} aria-hidden />}
               disabled={!amount || Number(amount) <= 0}
               loading={pay.isPending}
               onClick={() => pay.mutate()}

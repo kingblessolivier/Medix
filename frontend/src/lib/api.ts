@@ -295,6 +295,14 @@ export type MarketplaceRow = {
   product_type_code: string;
   /** Tablet, bottle, vial, pair — the base unit's name. */
   dosage_form: string;
+  /** The pack picture. Verification, never identification. */
+  image: string | null;
+  image_alt: string;
+  manufacturer_name: string | null;
+  gtin: string;
+  registration_number: string | null;
+  /** "Pack of 100 capsules — 100 capsule". How the pack is spoken about. */
+  pack_size: string;
   vendor: string;
   vendor_name: string;
   availability: string;
@@ -998,8 +1006,21 @@ export const api = {
     body: { listing: string; quantity: number; uom_code?: string },
   ) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/lines/`, { method: "POST", body }),
+  /* The buyer's own two steps. A pharmacist raises and sends; somebody
+     who can commit money releases. Both are the buying pharmacy — the
+     depot sees nothing until the second one happens. */
+  requestApproval: (id: string) =>
+    request<PurchaseOrder>(`/purchase-orders/${id}/request-approval/`, {
+      method: "POST",
+      body: {},
+    }),
   submitOrder: (id: string) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/submit/`, { method: "POST", body: {} }),
+  rejectOrder: (id: string, reason: string) =>
+    request<PurchaseOrder>(`/purchase-orders/${id}/reject/`, {
+      method: "POST",
+      body: { reason },
+    }),
   /* Warnings come back 422 with their codes. Present them, collect the
      acknowledgement, and retry naming the codes accepted — never a bare
      "yes", so a check added tomorrow is not pre-accepted by today's
@@ -1059,6 +1080,10 @@ export const api = {
   documents: (params = "") => request<Paginated<MedixDocument>>(`/documents/${params}`),
   documentsFor: (subjectId: string) =>
     request<Paginated<MedixDocument>>(`/documents/?subject=${subjectId}`),
+  /* Everything one transaction produced — the delivery note on its
+     shipment, the invoice on its invoice, the GRN on its receipt. */
+  documentsAbout: (transactionId: string) =>
+    request<Paginated<MedixDocument>>(`/documents/?related=${transactionId}`),
   /** The stored HTML, not a re-render — preview and print cannot diverge. */
   documentPreviewUrl: (id: string) => `${BASE}/documents/${id}/preview/`,
   documentPdfUrl: (id: string) => `${BASE}/documents/${id}/pdf/`,

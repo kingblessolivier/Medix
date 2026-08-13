@@ -77,7 +77,7 @@ export function AlertStack({
         <Button
           variant="tertiary"
           className="mt-2"
-          icon={<ChevronDown size={16} strokeWidth={1.9} />}
+          icon={<ChevronDown size={16} strokeWidth={1.9} aria-hidden />}
           onClick={() => setExpanded(true)}
         >
           {`${hidden} more`}
