@@ -28,6 +28,7 @@ import {
   type QuantityEntry,
 } from "@/lib/api";
 import { DataTable, type Column } from "@/components/data/DataTable";
+import { Help } from "@/components/ui/Guidance";
 import {
   Banner,
   Button,
@@ -406,7 +407,12 @@ function LineGrid({
             <Th>Batch</Th>
             <Th>Expiry</Th>
             <Th numeric>Unit cost</Th>
-            <Th numeric>Landed share</Th>
+            <Th numeric>
+              <Help term="Landed share">
+                This line's share of freight, duty and clearing. It goes into the
+                batch cost, so margins are true.
+              </Help>
+            </Th>
             <Th />
           </tr>
         </thead>

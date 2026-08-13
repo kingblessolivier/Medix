@@ -10,6 +10,8 @@ from django.db.models import Count
 from django_filters import rest_framework as filters
 from rest_framework import viewsets
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from django.db.models import Value
+from django.db.models.functions import Coalesce
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -63,10 +65,41 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering = ["name"]
 
     def get_queryset(self):
+        """The catalogue, with what is on the shelf against each row.
+
+        Annotated rather than looked up per row: the till searches this
+        endpoint on every keystroke, and a query per result would make
+        the counter slower exactly when somebody is waiting at it.
+
+        Available only — quarantined and expired stock is not sellable,
+        and counting it here would put the cashier back where they were.
+
+        `?location=` scopes it to one room, and the till passes the one
+        it is selling from. Without that the figure is the whole
+        pharmacy, and a cashier at the front counter would be told there
+        are twenty-four bottles when all twenty-four are in the cold
+        room — which is the same wrong answer in a politer voice.
+        """
+        from django.db.models import Q, Sum
+
+        from inventory.models import StockStatus
+
+        held = Q(batches__balances__status=StockStatus.AVAILABLE)
+        location = self.request.query_params.get("location")
+        if location:
+            held &= Q(batches__balances__location_id=location)
+
         return (
             Product.tenant_objects.select_related("product_type", "category")
             .prefetch_related("units", "registration")
-            .all()
+            .annotate(
+                # Through batches: StockBalance.product has no reverse
+                # accessor, and every balance belongs to a batch of this
+                # product, so the set is the same.
+                on_hand_base=Coalesce(
+                    Sum("batches__balances__quantity_base", filter=held), Value(0)
+                )
+            )
         )
 
     def get_serializer_class(self):

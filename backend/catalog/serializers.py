@@ -89,6 +89,23 @@ class ProductListSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True, default=None)
     requires_prescription = serializers.BooleanField(read_only=True)
 
+    #: What is on the shelf, in base units. Annotated by the viewset, so
+    #: the list stays one query.
+    #
+    # On the row because the till reads this list: a cashier searching
+    # "paracetamol" gets several products that look alike, and finding out
+    # which one is sellable by tapping it and reading a red banner is a
+    # conversation with the patient that should not have to happen.
+    on_hand_base = serializers.IntegerField(read_only=True, default=0)
+    base_uom_name = serializers.SerializerMethodField()
+
+    def get_base_uom_name(self, product) -> str:
+        """Names the unit the figure is in. "0" is not an answer."""
+        for unit in product.units.all():
+            if unit.is_base:
+                return unit.name
+        return ""
+
     class Meta:
         model = Product
         fields = [
@@ -104,6 +121,8 @@ class ProductListSerializer(serializers.ModelSerializer):
             "cold_chain",
             "gtin",
             "is_active",
+            "on_hand_base",
+            "base_uom_name",
         ]
 
 

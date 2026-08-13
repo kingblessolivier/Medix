@@ -123,7 +123,7 @@ export function PrescriptionsScreen() {
         density="compact"
         onRowClick={setSelected}
         caption="Prescriptions"
-        emptyHeading="Nothing here"
+        emptyHeading="No prescriptions"
         emptyBody="Prescriptions raised at the counter appear here."
       />
 

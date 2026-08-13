@@ -144,7 +144,7 @@ export function ClaimsScreen() {
           density="compact"
           onRowClick={setSelected}
           caption="Claims"
-          emptyHeading="Nothing here"
+          emptyHeading="No claims"
           emptyBody="Claims are raised when a covered sale completes."
         />
       )}

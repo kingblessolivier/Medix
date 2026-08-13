@@ -40,7 +40,14 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
 
   const products = useQuery({
     queryKey: ["pos-products", query],
-    queryFn: () => api.products(`?search=${encodeURIComponent(query)}`),
+    /* Scoped to this till's own location. The figure has to be the
+       shelf the sale will allocate from — a front counter told there
+       are twenty-four when all twenty-four are in the cold room is back
+       where it started. */
+    queryFn: () =>
+      api.products(
+        `?search=${encodeURIComponent(query)}&location=${locationId ?? ""}`,
+      ),
     enabled: query.trim().length >= 2,
   });
 
@@ -165,19 +172,34 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
               {products.data?.results.length === 0 ? (
                 <p className="px-3 py-3 text-body text-text-2">No results for "{query}"</p>
               ) : (
-                products.data?.results.slice(0, 6).map((product) => (
-                  <button
-                    key={product.id}
-                    type="button"
-                    onClick={() => addLine.mutate(product)}
-                    className="flex w-full items-center justify-between border-b border-hair px-3 py-2.5 text-left last:border-0 hover:bg-hover"
-                  >
-                    <span className="text-body">{product.name}</span>
-                    {product.requires_prescription && (
-                      <StatusDot tone="warn">Prescription</StatusDot>
-                    )}
-                  </button>
-                ))
+                products.data?.results.slice(0, 6).map((product) => {
+                  /* Two products whose names differ by one word are the
+                     normal case at a counter. What separates them is
+                     whether either can actually be sold, so that is on
+                     the row rather than behind a tap and a red banner. */
+                  const none = product.on_hand_base <= 0;
+                  return (
+                    <button
+                      key={product.id}
+                      type="button"
+                      disabled={none}
+                      onClick={() => addLine.mutate(product)}
+                      className="flex w-full items-center justify-between gap-3 border-b border-hair px-3 py-2.5 text-left last:border-0 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-body">{product.name}</span>
+                        <span className="block text-help text-text-3">
+                          {none
+                            ? "None on the shelf"
+                            : `${product.on_hand_base.toLocaleString()} ${product.base_uom_name.toLowerCase()}`}
+                        </span>
+                      </span>
+                      {product.requires_prescription && (
+                        <StatusDot tone="warn">Prescription</StatusDot>
+                      )}
+                    </button>
+                  );
+                })
               )}
             </div>
           )}

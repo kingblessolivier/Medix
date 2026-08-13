@@ -215,6 +215,10 @@ export type ProductRow = {
   cold_chain: boolean;
   gtin: string;
   is_active: boolean;
+  /** On the shelf now, in base units. Available only — not quarantined. */
+  on_hand_base: number;
+  /** Names the unit the figure is in. "0" is not an answer on its own. */
+  base_uom_name: string;
 };
 
 export type UnitOfMeasureRow = {
