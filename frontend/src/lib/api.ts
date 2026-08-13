@@ -575,6 +575,94 @@ export type IntelligenceReport = {
   stock_outs: { product: string; name: string; sold: number; on_hand: number }[];
 };
 
+/* -- insurance --------------------------------------------------------- */
+
+/** Whether cover applies, and if not, exactly why. The reason is three
+    different conversations at the counter, not one refusal. */
+export type Eligibility = {
+  covered: boolean;
+  reason: string;
+  member_number: string;
+  scheme: string;
+  /** FEE_FOR_SERVICE raises a claim per sale; CAPITATION raises none. */
+  model: string;
+  contract: string | null;
+};
+
+export type SaleCover = {
+  covered: boolean;
+  reason: string;
+  model: string;
+  gross: number;
+  scheme_amount: number;
+  patient_amount: number;
+  eligibility: Eligibility;
+  lines: {
+    sale_line: string;
+    product: string;
+    gross: number;
+    covered: number;
+    patient: number;
+    coverage_basis_points: number;
+    note: string;
+  }[];
+};
+
+export type ClaimLine = {
+  id: string;
+  sale_line: string;
+  product_name: string;
+  gross_amount: number;
+  covered_amount: number;
+  patient_amount: number;
+  coverage_basis_points: number;
+  allowed_amount: number;
+  is_rejected: boolean;
+  rejection_reason: string;
+};
+
+export type Claim = {
+  id: string;
+  number: string;
+  scheme: string;
+  scheme_name: string;
+  member_number: string;
+  patient_name: string;
+  sale: string;
+  sale_number: string;
+  status: string;
+  status_label: string;
+  claimed_amount: number;
+  allowed_amount: number;
+  patient_paid: number;
+  settled: number;
+  outstanding: number;
+  currency: string;
+  dispensed_on: string;
+  submit_by: string | null;
+  submitted_at: string | null;
+  responded_at: string | null;
+  rejection_reason: string;
+  scheme_reference: string;
+  lines: ClaimLine[];
+  payments: { id: string; amount: number; received_on: string; remittance_reference: string }[];
+};
+
+export type SchemeReceivables = {
+  as_of: string;
+  buckets: Record<string, number>;
+  total: number;
+  /** Counted apart from the ageing: refused is not late. */
+  rejected_total: number;
+  schemes: (Record<string, number | string> & {
+    scheme: string;
+    outstanding: number;
+    rejected: number;
+  })[];
+};
+
+export type Scheme = { id: string; name: string; code: string; is_active: boolean };
+
 /* -- documents --------------------------------------------------------- */
 
 /* Named MedixDocument because `Document` is the DOM global, and shadowing
@@ -1005,6 +1093,30 @@ export const api = {
   pharmacies: () => request<Pharmacy[]>("/pharmacies/"),
 
   compliance: () => request<ComplianceState>("/compliance/"),
+
+  /* -- insurance ------------------------------------------------------- */
+
+  schemes: () => request<Paginated<Scheme>>("/schemes/"),
+  eligibility: (patientId: string) =>
+    request<Eligibility>(`/eligibility/?patient=${patientId}`),
+  saleCover: (saleId: string) => request<SaleCover>(`/sales/${saleId}/cover/`),
+  claims: () => request<Paginated<Claim>>("/claims/"),
+  submitClaim: (id: string) =>
+    request<Claim>(`/claims/${id}/submit/`, { method: "POST", body: {} }),
+  respondToClaim: (
+    id: string,
+    body: {
+      allowed?: Record<string, number>;
+      rejections?: Record<string, string>;
+      reason?: string;
+      scheme_reference?: string;
+    },
+  ) => request<Claim>(`/claims/${id}/respond/`, { method: "POST", body }),
+  recordClaimPayment: (
+    id: string,
+    body: { amount: number; received_on?: string; remittance_reference?: string },
+  ) => request<Claim>(`/claims/${id}/payments/`, { method: "POST", body }),
+  schemeReceivables: () => request<SchemeReceivables>("/insurance/receivables/"),
 
   search: (term: string) =>
     request<{ term: string; results: SearchHit[] }>(

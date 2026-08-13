@@ -32,6 +32,7 @@ class DocumentKind(models.TextChoices):
     CREDIT_NOTE = "CREDIT_NOTE", "Credit note"
     DEBIT_NOTE = "DEBIT_NOTE", "Debit note"
     WRITE_OFF = "WRITE_OFF", "Inventory write-off certificate"
+    CLAIM = "CLAIM", "Insurance claim"
 
 
 #: Which `core.sequences` code numbers each kind. Kept beside the choices
@@ -46,6 +47,7 @@ SEQUENCE_FOR = {
     DocumentKind.CREDIT_NOTE: "CREDIT_NOTE",
     DocumentKind.DEBIT_NOTE: "DEBIT_NOTE",
     DocumentKind.WRITE_OFF: "WRITE_OFF",
+    DocumentKind.CLAIM: "CLAIM",
 }
 
 

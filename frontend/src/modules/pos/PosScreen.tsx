@@ -75,6 +75,15 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
 
   const [accepted, setAccepted] = useState<string[]>([]);
 
+  /* What the scheme covers, so the counter charges the co-pay rather
+     than the full amount. Refetched as lines change, because cover is
+     computed per line and a new product may be excluded. */
+  const cover = useQuery({
+    queryKey: ["sale-cover", saleId, sale.data?.lines.length],
+    queryFn: () => api.saleCover(saleId!),
+    enabled: Boolean(saleId) && (sale.data?.lines.length ?? 0) > 0,
+  });
+
   const complete = useMutation({
     mutationFn: () => api.completeSale(saleId!, { acknowledged: accepted }),
     onSuccess: (updated) => {
@@ -204,6 +213,13 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
               recorded data match the pharmacist clears — never a refusal,
               because a hard stop gets worked around while an
               acknowledgement gets written to the audit stream. */}
+          {/* Says why cover did not apply. "Not a member", "card
+              expired" and "not on their panel" are three different
+              conversations to have with the patient. */}
+          {cover.data && !cover.data.covered && cover.data.reason && (
+            <Banner tone="info">{cover.data.reason}</Banner>
+          )}
+
           {review.data && (
             <>
               <AlertStack
@@ -236,6 +252,31 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
                 {money(current?.total ?? 0)}
               </span>
             </div>
+
+            {/* The number the patient actually hands over. Shown as the
+                headline once cover applies, because charging the gross
+                to a covered patient is the failure this exists to
+                prevent. */}
+            {cover.data?.covered && (
+              <div className="mt-3 border-t border-border pt-2">
+                <Row
+                  label={`${cover.data.eligibility.scheme} pays`}
+                  value={money(cover.data.scheme_amount)}
+                />
+                <div className="mt-1 flex items-baseline justify-between">
+                  <span className="text-section font-semibold text-brand-text">
+                    Patient pays
+                  </span>
+                  <span className="text-hero font-semibold tabular text-brand-text">
+                    {money(cover.data.patient_amount)}
+                  </span>
+                </div>
+                <p className="mt-1 text-help text-text-3">
+                  {cover.data.eligibility.member_number}
+                  {cover.data.model === "CAPITATION" && " · capitation, no claim"}
+                </p>
+              </div>
+            )}
             {current && current.outstanding !== current.total && (
               <Row label="Outstanding" value={money(current.outstanding)} />
             )}

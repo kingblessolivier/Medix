@@ -14,6 +14,7 @@ import {
   ChartNoAxesCombined,
   ClipboardList,
   FileText,
+  HeartPulse,
   LayoutDashboard,
   Lightbulb,
   Moon,
@@ -85,7 +86,10 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   if (can("DISPENSE")) {
     groups.push({
       label: "Patients",
-      items: [{ id: "prescriptions", label: "Prescriptions", icon: ClipboardList }],
+      items: [
+        { id: "prescriptions", label: "Prescriptions", icon: ClipboardList },
+        { id: "claims", label: "Claims", icon: HeartPulse },
+      ],
     });
   }
 

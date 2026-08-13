@@ -101,7 +101,16 @@ VAT classification for the full product mix · GS1 mandate dates for Rwanda · c
 
 ## Phase 5 — Insurance
 
-*Deferred until V3 is answered. Shape depends on the answer.*
+**Built, with both shapes modelled.** V3 remains open, and the mitigation
+`docs/11` R3 already named is what unblocked it: `SchemeContract.model`
+carries the reimbursement shape, so answering V3 later selects a contract
+row rather than forcing a rewrite.
+
+They are genuinely different workflows, not one with a different rate.
+Fee-for-service raises a claim per covered sale. **Capitation raises
+none** — the scheme has already paid for the period, so claiming as well
+would be asking twice, and the question becomes utilisation against the
+money received.
 
 - Schemes, contracts, selective contracting status
 - Coverage rules as versioned configuration

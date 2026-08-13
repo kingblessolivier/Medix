@@ -304,3 +304,57 @@ def controlled_transfer(transfer) -> dict:
         }
     )
     return context
+
+
+def claim(claim_record) -> dict:
+    """What the scheme is being asked to pay, line by line.
+
+    Both halves of every line are printed — what the scheme is asked for
+    and what the patient already paid — because a claim that shows only
+    the claimed figure cannot be checked against the receipt the patient
+    holds.
+    """
+    context = base(
+        doc_type="Insurance claim",
+        number=claim_record.number,
+        issuer=party(claim_record.organization, licence_kind="RETAIL"),
+        recipient={
+            "name": claim_record.scheme.name,
+            "licence": "",
+            "tin": "",
+            "address": "",
+        },
+        status=claim_record.get_status_display(),
+    )
+    context.update(
+        {
+            "currency": claim_record.currency,
+            "member_number": claim_record.member.member_number,
+            "patient": claim_record.member.patient.full_name,
+            "principal": claim_record.member.principal_name,
+            "sale_number": claim_record.sale.number,
+            "dispensed_on": day(claim_record.dispensed_on),
+            "submit_by": day(claim_record.submit_by),
+            "lines": [
+                {
+                    "product": line.sale_line.product.name,
+                    "quantity": f"{line.sale_line.quantity:,} "
+                    f"{line.sale_line.uom.code.lower()}",
+                    "gross": money(line.gross_amount, claim_record.currency),
+                    "covered": money(line.covered_amount, claim_record.currency),
+                    "patient": money(line.patient_amount, claim_record.currency),
+                    "percentage": f"{line.coverage_basis_points / 100:g}%",
+                    "rejected": line.is_rejected,
+                    "rejection_reason": line.rejection_reason,
+                }
+                for line in claim_record.lines.select_related(
+                    "sale_line__product", "sale_line__uom"
+                )
+            ],
+            "claimed": money(claim_record.claimed_amount, claim_record.currency),
+            "patient_paid": money(claim_record.patient_paid, claim_record.currency),
+            "allowed": money(claim_record.allowed_amount, claim_record.currency),
+            "rejection_reason": claim_record.rejection_reason,
+        }
+    )
+    return context

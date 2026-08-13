@@ -14,6 +14,7 @@ See docs/03-data-model.md, docs/06-compliance.md.
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from django.db import transaction
@@ -37,6 +38,9 @@ from sales.models import (
     Shift,
     TaxRule,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 class SaleNotDraft(DomainError):
@@ -356,6 +360,12 @@ def complete_sale(
             registration=registration,
         )
 
+    # Cover is resolved before the number is allocated, so a claim and
+    # the sale it belongs to are one transaction. Under capitation this
+    # returns nothing — the scheme has already paid for the period, and
+    # claiming as well would be asking twice.
+    _raise_claim_if_covered(sale=sale, patient=patient, performed_by=performed_by)
+
     sale.number = sequences.next_number(sale.organization, "SALE")
     sale.pharmacist = pharmacist
     sale.prescription = prescription
@@ -388,6 +398,35 @@ def complete_sale(
         ]
     )
     return sale
+
+
+def _raise_claim_if_covered(*, sale, patient, performed_by) -> None:
+    """Split a covered sale and raise its claim, where one applies.
+
+    Failure here must not lose the dispensing. The goods have left the
+    counter and the ledger has moved; a claim that could not be raised is
+    recoverable paperwork, and refusing the sale over it would be the
+    wrong trade.
+    """
+    if patient is None:
+        return
+
+    from insurance import services as insurance
+
+    try:
+        eligibility = insurance.check_eligibility(
+            organization=sale.organization, patient=patient
+        )
+        if not eligibility.covered:
+            return
+        insurance.raise_claim(
+            organization=sale.organization,
+            sale=sale,
+            eligibility=eligibility,
+            performed_by=performed_by,
+        )
+    except Exception:
+        log.exception("Could not raise a claim for %s", sale.id)
 
 
 def _gate_prescription(lines: list[SaleLine], prescription: Prescription | None) -> None:

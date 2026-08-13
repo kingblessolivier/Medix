@@ -19,6 +19,7 @@ import { DistributionScreen } from "@/modules/distribution/DistributionScreen";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
 import { DocumentsScreen } from "@/modules/documents/DocumentsScreen";
 import { FinanceScreen } from "@/modules/finance/FinanceScreen";
+import { ClaimsScreen } from "@/modules/insurance/ClaimsScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
 import { OverviewScreen } from "@/modules/overview/OverviewScreen";
 import { PharmaciesScreen } from "@/modules/pharmacies/PharmaciesScreen";
@@ -166,6 +167,8 @@ export default function App() {
           <IntelligenceScreen />
         ) : active === "catalogue" ? (
           <ProductEditor />
+        ) : active === "claims" && canSell ? (
+          <ClaimsScreen />
         ) : (
           <EmptyState
             heading="Not built yet"

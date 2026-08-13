@@ -178,3 +178,23 @@ def issue_controlled_transfer(*, transfer, performed_by: User | None = None) -> 
         performed_by=performed_by,
         number=transfer.number,
     )
+
+
+def issue_claim(*, claim_record, performed_by: User | None = None) -> Document:
+    """The claim as it stood when it was sent.
+
+    A resubmission after a rejection is a **new version of the same
+    number**, not a new claim — the scheme is looking at one claim that
+    was corrected, and giving it a second number would make the two look
+    like duplicate submissions.
+    """
+    previous = latest(subject=claim_record, kind=DocumentKind.CLAIM)
+    return issue(
+        kind=DocumentKind.CLAIM,
+        subject=claim_record,
+        organization=claim_record.organization,
+        context=build.claim(claim_record),
+        performed_by=performed_by,
+        number=None if previous else claim_record.number,
+        supersedes=previous,
+    )
