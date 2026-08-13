@@ -621,8 +621,8 @@ These block work rather than slow it.
 
 ## What was learned along the way
 
-Four things the plan did not anticipate, recorded because they are the
-kind of thing that gets rediscovered expensively.
+Things the plan did not anticipate, recorded because they are the kind
+of thing that gets rediscovered expensively.
 
 **`AuditEvent` had never been written to.** The table, the append-only
 grants and the revoked update path had all been in place since Phase 0,
@@ -656,3 +656,89 @@ came to depend on import order. It surfaced as the test-database flush
 failing to truncate `core_organization`, because a table Django did not
 know about was holding a foreign key into it. The tables are declared in
 `core/models.py` now; the behaviour stayed where it was.
+
+**A view that overrides `permission_classes` unbinds itself from its
+tenant.** `permission_classes = [IsAuthenticated]` replaces the default
+pair, and the default pair is what sets the active organization — Django
+middleware runs before DRF authenticates, so `TenantScoped` is the first
+hook where the user is known. Twenty-four views had written it, and the
+failure was silent: `tenant_objects` scoped to nothing and the endpoint
+answered with an empty list or a 404 rather than an error. Found by a
+404 on an endpoint that plainly should have worked. There is now a test
+that walks the URL conf and asserts every API view is bound.
+
+**The buyer's own approval step had no route.** `request_approval` and
+`reject_order` had been in `commerce/services.py` since the approval
+chain was built, tested and correct, and neither had ever been exposed.
+The Orders screen offered one action on a draft — "Submit" — and the
+server answered it with *This order is not awaiting approval*, every
+time. A pharmacist could build an order from the marketplace and had no
+way to place it. Found by using the system rather than by testing it:
+the services were green throughout.
+
+**A control nobody can satisfy is not a control.** Separation of duties
+refused self-approval outright, which locks out every one-person
+pharmacy — a great many Rwandan retail pharmacies, and the shape of the
+demo data. The response to such a rule is a second login shared on one
+keyboard, which is the same risk with the audit trail switched off. The
+rule now applies whenever a colleague exists and records
+*self-approved* when one does not.
+
+**Documents were unreachable from the thing they were about.** The
+delivery note hangs off the shipment, the invoice off the invoice, the
+GRN off the receipt — each correct, each recording the event that
+produced it. But asking "what paperwork does this order have" by subject
+returned nothing. Survivable while a document screen existed to browse;
+fatal once documents moved onto the transaction row. `?related=<order>`
+now resolves the chain.
+
+**A tenant boundary can be too tight to be usable.** Documents were
+scoped to their issuer, so a pharmacy could not open the delivery note
+for the boxes on its own counter. The rule was protecting the picking
+ticket — the depot's own shelf locations — and was applied to everything.
+The counterparty to an order now reads the documents addressed to them,
+and only those.
+
+**An offer of nothing was displayed as available.** A listing with
+`availability=AVAILABLE_NOW` and no allocation behind it showed
+"Available" with an enabled order button, and refused at the server with
+*0 box available* after the buyer had chosen a quantity. Seven of sixty
+seeded listings were in that state. The row says "None left" now.
+
+
+---
+
+## Stage 13 — Documents on the transaction, and usability
+
+Two changes that came from a direction set after the plan was written,
+and one that came from using the system rather than testing it.
+
+**The document centre is gone.** Documents were a destination in the
+sidebar with its own filters. They are now chips on the row of the
+transaction that produced them, opening the document itself. `?related=`
+resolves the chain, so an order finds the delivery note on its shipment
+and the invoice on its invoice; the counterparty to an order can read
+the documents addressed to them, and never the picking ticket. See
+`docs/19-screens.md` and `components/data/DocumentChips.tsx`.
+
+**A buyer can see what they are buying.** The marketplace row, card and
+detail carry the pack picture, the pack size in words, the manufacturer,
+the barcode and the Rwanda FDA registration number. The picture is
+verification and never identification — a photo can be of the wrong box,
+and a buyer who ordered on artwork alone has no recourse.
+
+**The interface names the work rather than the record.** "Deliveries"
+not "Receiving", "Orders to fill" not "Distribution", "Send for
+approval" not "Submit". Three primitives support it, in
+`components/ui/Guidance.tsx`: `Help` — one sentence on demand beside a
+term like *Available*; `NextAction` — what to do now and the button that
+does it, because a status is not an instruction; `Consequence` — what a
+confirmation will actually do, in place of "are you sure".
+
+**Verification.** The whole trip was walked as a user against a live
+server on seeded data — sign in, browse, order, approve, confirm,
+dispatch, receive, ask, report. It found five defects that the test
+suite was green through, listed under *What was learned along the way*.
+The most serious was that a purchase order could not leave draft at all:
+the approval services existed, tested and correct, with no route to
+them.

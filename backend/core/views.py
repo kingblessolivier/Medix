@@ -2,6 +2,10 @@ from django.db import connection
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from core.permissions import TenantScoped
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -84,7 +88,7 @@ class RegisterPharmacyView(APIView):
     customer you cannot supply is not a meaningful act.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def post(self, request):
         require_capability(request.user.organization, Capability.PUBLISH_LISTINGS)
@@ -133,7 +137,7 @@ class SearchView(APIView):
     know which screen that number belongs to.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         found = search_service.search(
@@ -162,7 +166,7 @@ class PharmacyViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     their other suppliers.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
     serializer_class = serializers.Serializer
 
     def list(self, request):
@@ -202,3 +206,29 @@ class PharmacyViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 }
             )
         return Response(rows)
+
+
+# --------------------------------------------------------------------------
+# Rate-limited authentication
+# --------------------------------------------------------------------------
+
+
+class AuthThrottle(ScopedRateThrottle):
+    """10/min per IP — docs/07-api.md.
+
+    Anonymous, so it keys on address rather than user: the whole point is
+    the requests that never succeed in authenticating.
+    """
+
+    scope = "auth"
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
+
+
+class ThrottledTokenObtainPairView(TokenObtainPairView):
+    throttle_classes = [AuthThrottle]
+
+
+class ThrottledTokenRefreshView(TokenRefreshView):
+    throttle_classes = [AuthThrottle]

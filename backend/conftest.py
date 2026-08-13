@@ -11,3 +11,9 @@ def pytest_configure(config):
 
     # Nothing under test should reach a broker.
     settings.CELERY_TASK_ALWAYS_EAGER = True
+
+    # Throttling counts through the cache. Tests must not need a Redis to
+    # run, and must not share counters with a developer's running server.
+    settings.CACHES = {
+        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+    }

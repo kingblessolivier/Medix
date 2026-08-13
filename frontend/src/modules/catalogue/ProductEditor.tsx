@@ -210,7 +210,7 @@ function Units({ product }: { product: ProductRow }) {
 
       <Button
         className="mt-3"
-        icon={<Plus size={16} strokeWidth={1.9} />}
+        icon={<Plus size={16} strokeWidth={1.9} aria-hidden />}
         onClick={() => setAdding(true)}
       >
         Add a level
@@ -267,7 +267,7 @@ function UnitModal({
   return (
     <Modal
       open
-      title="Add a packaging level"
+      title="Add packaging level"
       subtitle={product.name}
       onClose={onClose}
       footer={
@@ -293,7 +293,7 @@ function UnitModal({
             <Input id={id} value={name} onChange={(e) => setName(e.target.value)} />
           )}
         </Field>
-        <Field label="Base units in one" help="No two levels may share a factor." required>
+        <Field label="Base units" help="No two levels may share a factor." required>
           {(id) => (
             <Input
               id={id}
@@ -305,7 +305,7 @@ function UnitModal({
             />
           )}
         </Field>
-        <Field label="Sold at this level" help="A depot that will not break a pack says no.">
+        <Field label="Sellable" help="A depot that will not break a pack says no.">
           {(id) => (
             <Select id={id} value={sellable} onChange={(e) => setSellable(e.target.value)}>
               <option value="yes">Yes</option>
@@ -403,7 +403,7 @@ function Images({ product }: { product: ProductRow }) {
         </Field>
         <Button
           variant="primary"
-          icon={<ImagePlus size={16} strokeWidth={1.9} />}
+          icon={<ImagePlus size={16} strokeWidth={1.9} aria-hidden />}
           disabled={!file || !alt.trim()}
           loading={upload.isPending}
           onClick={() => upload.mutate()}

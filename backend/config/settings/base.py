@@ -47,6 +47,7 @@ LOCAL_APPS = [
     "documents",
     "finance",
     "insurance",
+    "assistant",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -154,6 +155,22 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 50,
     "EXCEPTION_HANDLER": "core.exceptions.exception_handler",
     "TEST_REQUEST_DEFAULT_FORMAT": "json",
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
+    ),
+    # The table in docs/07-api.md. The scoped entries are lower than the
+    # standard rate because each request behind them costs more than a
+    # list query: the assistant fans out into aggregates, sync replays a
+    # whole batch, and a render spawns a browser.
+    "DEFAULT_THROTTLE_RATES": {
+        "user": "600/min",
+        "anon": "60/min",
+        "auth": "10/min",
+        "assistant": "30/min",
+        "sync": "120/min",
+        "documents": "60/min",
+    },
 }
 
 SPECTACULAR_SETTINGS = {

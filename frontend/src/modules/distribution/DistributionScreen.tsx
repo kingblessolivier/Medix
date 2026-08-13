@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, PackageCheck, Truck } from "lucide-react";
+import { DocumentChips } from "@/components/data/DocumentChips";
 import {
   DataTable,
   TableTabs,
@@ -186,6 +187,12 @@ export function DistributionScreen({
         return <StatusPill tone={stage.tone}>{stage.label}</StatusPill>;
       },
     },
+    {
+      key: "documents",
+      header: "Documents",
+      width: "11rem",
+      render: (o) => <DocumentChips subject={o.id} label={o.number} />,
+    },
   ];
 
   return (
@@ -263,7 +270,7 @@ function FulfilmentModal({
       <Button
         variant="primary"
         className="w-full"
-        icon={<Check size={16} strokeWidth={1.9} />}
+        icon={<Check size={16} strokeWidth={1.9} aria-hidden />}
         loading={busy}
         disabled={blocking}
         onClick={onConfirm}
@@ -274,7 +281,7 @@ function FulfilmentModal({
       <Button
         variant="primary"
         className="w-full"
-        icon={<PackageCheck size={16} strokeWidth={1.9} />}
+        icon={<PackageCheck size={16} strokeWidth={1.9} aria-hidden />}
         loading={busy}
         onClick={onPrepare}
       >
@@ -284,7 +291,7 @@ function FulfilmentModal({
       <Button
         variant="primary"
         className="w-full"
-        icon={<Truck size={16} strokeWidth={1.9} />}
+        icon={<Truck size={16} strokeWidth={1.9} aria-hidden />}
         loading={busy}
         disabled={!canDispatch}
         onClick={onDispatch}

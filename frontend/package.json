@@ -26,6 +26,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "types": "tsc --noEmit"
+    "types": "tsc --noEmit",
+    "palette": "node ../scripts/validate-palette.mjs",
+    "copy": "node ../scripts/validate-copy.mjs",
+    "a11y": "node ../scripts/validate-a11y.mjs",
+    "check": "npm run types && npm run palette && npm run copy && npm run a11y"
   }
 }

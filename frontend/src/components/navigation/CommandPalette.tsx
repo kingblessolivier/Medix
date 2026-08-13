@@ -117,9 +117,10 @@ export function CommandPalette({
           <Search size={16} strokeWidth={1.9} aria-hidden className="text-text-3" />
           <input
             ref={inputRef}
+            aria-label="Search"
             value={term}
             onChange={(e) => setTerm(e.target.value)}
-            placeholder="Batch, order, invoice, product…"
+            placeholder="Batch, order, invoice…"
             className="h-11 w-full bg-transparent text-body text-text placeholder:text-text-3 focus:outline-none"
           />
         </div>

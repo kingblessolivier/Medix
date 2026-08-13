@@ -10,6 +10,8 @@ from __future__ import annotations
 from django.utils import timezone
 from rest_framework import serializers, viewsets
 from rest_framework.permissions import IsAuthenticated
+
+from core.permissions import TenantScoped
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -19,6 +21,7 @@ from core import checks as core_checks
 from core.alerts import seed_alert_rules, summarise
 from core.models import AlertRule, ControlledQuota
 from inventory import checks as inventory_checks
+from inventory import telemetry
 
 #: Which checks a screen runs. Named so the client asks for a scope
 #: rather than enumerating check functions over the wire.
@@ -26,6 +29,7 @@ SCOPES = {
     "inventory": lambda org: [
         *inventory_checks.short_dated_batches(organization=org),
         *inventory_checks.below_reorder_point(organization=org),
+        *telemetry.checks(organization=org),
     ],
     "receivables": lambda org: commerce_checks.receivables_overdue(supplier=org),
     "compliance": lambda org: [
@@ -36,7 +40,7 @@ SCOPES = {
 
 
 class AlertView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         organization = request.user.organization
@@ -58,7 +62,7 @@ class ComplianceView(APIView):
     worse than none, because it is believed.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         return Response(
@@ -74,7 +78,7 @@ class RegulatorExtractView(APIView):
     get two answers rather than one moving one.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request):
         from datetime import date
@@ -102,7 +106,7 @@ class RegulatorExtractView(APIView):
 class ProductAlertView(APIView):
     """Everything wrong with one product, for its detail modal."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request, product_id):
         from catalog.models import Product
@@ -143,7 +147,7 @@ class AlertRuleViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = AlertRuleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get_queryset(self):
         return AlertRule.tenant_objects.order_by("code", "-effective_from")
@@ -182,7 +186,7 @@ class ControlledQuotaViewSet(viewsets.ModelViewSet):
     """What the regulator caps, per schedule, per period."""
 
     serializer_class = ControlledQuotaSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get_queryset(self):
         return ControlledQuota.tenant_objects.order_by("schedule", "-effective_from")

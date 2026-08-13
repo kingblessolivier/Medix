@@ -280,3 +280,15 @@ class Allocation:
             and other.batch_id == self.batch.id
             and other.quantity_base == self.quantity_base
         )
+
+
+# --------------------------------------------------------------------------
+# Cold chain
+#
+# Declared here rather than beside their logic in `inventory/telemetry.py`
+# for the reason `core/models.py` records: Django registers a model when
+# the module defining it is imported, and a lazily-imported module makes
+# the app registry depend on import order.
+# --------------------------------------------------------------------------
+
+from inventory.telemetry import Excursion, Reading, Sensor  # noqa: E402,F401

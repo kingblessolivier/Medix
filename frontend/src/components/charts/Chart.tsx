@@ -102,9 +102,9 @@ function Shell({
           onClick={() => setAsTable((on) => !on)}
           icon={
             asTable ? (
-              <ChartNoAxesColumn size={16} strokeWidth={1.9} />
+              <ChartNoAxesColumn size={16} strokeWidth={1.9} aria-hidden />
             ) : (
-              <Table2 size={16} strokeWidth={1.9} />
+              <Table2 size={16} strokeWidth={1.9} aria-hidden />
             )
           }
         >

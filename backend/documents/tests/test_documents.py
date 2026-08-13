@@ -466,3 +466,62 @@ class TestPdfRendering:
         )
         assert document.html
         assert document.sha256
+
+
+class TestWhoCanReadWhat:
+    """The tenant line, and the one place it is deliberately crossed.
+
+    A delivery note is a statement of what was sent, addressed to the
+    person unpacking the boxes. A picking ticket is the depot telling its
+    own staff which shelf to walk to. The first must reach the buyer; the
+    second must not.
+    """
+
+    def client_for(self, user):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def kinds_visible_to(self, user, order):
+        response = self.client_for(user).get(f"/api/v1/documents/?related={order.id}")
+        assert response.status_code == 200
+        return {row["kind"] for row in response.data["results"]}
+
+    def test_the_depot_sees_everything_it_issued(self, shipped):
+        kinds = self.kinds_visible_to(shipped["seller"], shipped["order"])
+        assert {"DELIVERY_NOTE", "PICKING_TICKET"} <= kinds
+
+    def test_the_buyer_can_read_the_delivery_note(self, shipped):
+        """The boxes are on her counter. She may read what came with them."""
+        assert "DELIVERY_NOTE" in self.kinds_visible_to(
+            shipped["buyer"], shipped["order"]
+        )
+
+    def test_the_buyer_never_sees_the_picking_ticket(self, shipped):
+        """It names the depot's own shelves. Not her business."""
+        assert "PICKING_TICKET" not in self.kinds_visible_to(
+            shipped["buyer"], shipped["order"]
+        )
+
+    def test_a_stranger_sees_nothing(self, shipped):
+        """Not a party to the order, so not a party to its paperwork."""
+        other = make_org("Nyarugenge Pharmacy", kind=LicenceKind.RETAIL_PHARMACY)
+        stranger = User.objects.create_user(
+            username="alice", password="x", organization=other
+        )
+        assert self.kinds_visible_to(stranger, shipped["order"]) == set()
+
+    def test_the_chain_is_reachable_from_the_order(self, shipped):
+        """The delivery note hangs off the shipment, not the order.
+
+        Asking by subject finds nothing, which is what sent people to a
+        document screen to hunt for it. Asking by chain finds it.
+        """
+        client = self.client_for(shipped["seller"])
+        by_subject = client.get(f"/api/v1/documents/?subject={shipped['order'].id}")
+        by_chain = client.get(f"/api/v1/documents/?related={shipped['order'].id}")
+
+        assert by_subject.data["count"] == 0
+        assert by_chain.data["count"] >= 2

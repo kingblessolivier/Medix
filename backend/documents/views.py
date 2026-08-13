@@ -12,17 +12,53 @@ from django.http import Http404, HttpResponse
 from django_filters import rest_framework as filters
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
+from rest_framework.throttling import ScopedRateThrottle
 
-from documents.models import Document
+from django.db import models
+
+from documents.models import Document, DocumentKind
 from documents.serializers import DocumentSerializer
 
 
 class DocumentFilter(filters.FilterSet):
     subject = filters.UUIDFilter(field_name="subject_id")
+    #: Everything one transaction produced, wherever it was attached.
+    related = filters.UUIDFilter(method="_related")
 
     class Meta:
         model = Document
-        fields = ["kind", "number", "subject"]
+        fields = ["kind", "number", "subject", "related"]
+
+    def _related(self, queryset, name, value):
+        """Every document down this order's chain.
+
+        A purchase order's paperwork is not attached to the order: the
+        delivery note and picking ticket belong to the shipment, the
+        invoice to the invoice, the GRN to the receipt. That is right —
+        each document records the event that produced it — but a
+        pharmacist looking at PO-2026-00001 means all of them.
+
+        Ids only, and each read is tenant-scoped on the way in, so this
+        widens what is *found* rather than what is visible.
+        """
+        from commerce.models import GoodsReceipt, Invoice, PurchaseOrder, Shipment
+
+        order = PurchaseOrder.objects.filter(pk=value).first()
+        if order is None:
+            return queryset.filter(subject_id=value)
+
+        subjects = {str(order.id)}
+        subjects |= {
+            str(pk) for pk in Shipment.objects.filter(order=order).values_list("id", flat=True)
+        }
+        subjects |= {
+            str(pk) for pk in Invoice.objects.filter(order=order).values_list("id", flat=True)
+        }
+        subjects |= {
+            str(pk)
+            for pk in GoodsReceipt.objects.filter(order=order).values_list("id", flat=True)
+        }
+        return queryset.filter(subject_id__in=subjects)
 
 
 class DocumentViewSet(
@@ -30,9 +66,79 @@ class DocumentViewSet(
 ):
     serializer_class = DocumentSerializer
     filterset_class = DocumentFilter
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "documents"
+
+    #: Addressed to the other side of the order, so readable by them.
+    #: A picking ticket is not here on purpose: it is the depot telling
+    #: its own staff which shelf to walk to, and it names locations the
+    #: buyer has no business seeing.
+    COUNTERPARTY_KINDS = [
+        DocumentKind.DELIVERY_NOTE,
+        DocumentKind.TAX_INVOICE,
+        DocumentKind.PROFORMA,
+        DocumentKind.CREDIT_NOTE,
+        DocumentKind.DEBIT_NOTE,
+    ]
 
     def get_queryset(self):
-        return Document.tenant_objects.select_related("issued_by")
+        """What this organization issued, plus what was issued to it.
+
+        The second half is a deliberate, narrow crossing of the tenant
+        line. It is bounded three ways: only these kinds, only documents
+        attached to an order this organization placed, and read-only.
+        A pharmacy that cannot open the delivery note for the boxes on
+        its own counter is a pharmacy that keeps a paper file instead.
+        """
+        from commerce.models import GoodsReceipt, Invoice, PurchaseOrder, Shipment
+        from core.tenancy import tenant_bypass
+
+        mine = Document.tenant_objects.select_related("issued_by")
+
+        organization = getattr(self.request.user, "organization", None)
+        if organization is None:
+            return mine
+
+        orders = PurchaseOrder.objects.filter(organization=organization).values_list(
+            "id", flat=True
+        )
+        if not orders:
+            return mine
+
+        subjects = {str(pk) for pk in orders}
+        subjects |= {
+            str(pk)
+            for pk in Shipment.objects.filter(order_id__in=orders).values_list(
+                "id", flat=True
+            )
+        }
+        subjects |= {
+            str(pk)
+            for pk in Invoice.objects.filter(order_id__in=orders).values_list(
+                "id", flat=True
+            )
+        }
+        subjects |= {
+            str(pk)
+            for pk in GoodsReceipt.objects.filter(order_id__in=orders).values_list(
+                "id", flat=True
+            )
+        }
+
+        with tenant_bypass():
+            addressed_to_me = list(
+                Document.objects.filter(
+                    subject_id__in=subjects, kind__in=self.COUNTERPARTY_KINDS
+                )
+                .exclude(organization=organization)
+                .values_list("id", flat=True)
+            )
+
+        if not addressed_to_me:
+            return mine
+        return Document.objects.filter(
+            models.Q(organization=organization) | models.Q(id__in=addressed_to_me)
+        ).select_related("issued_by")
 
     @action(detail=True, methods=["get"])
     def preview(self, request, pk=None):

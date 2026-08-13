@@ -220,16 +220,16 @@ export function DataTable<T>({
                       {/* The affordance stays quiet until interacted with. */}
                       {active ? (
                         sort!.dir === "asc" ? (
-                          <ChevronUp size={14} strokeWidth={2} />
+                          <ChevronUp size={14} strokeWidth={2} aria-hidden />
                         ) : (
-                          <ChevronDown size={14} strokeWidth={2} />
+                          <ChevronDown size={14} strokeWidth={2} aria-hidden />
                         )
                       ) : (
                         <ChevronsUpDown
                           size={14}
                           strokeWidth={1.8}
                           className="opacity-0 transition-opacity group-hover:opacity-60"
-                        />
+                        aria-hidden />
                       )}
                     </button>
                   ) : (

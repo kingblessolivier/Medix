@@ -97,9 +97,10 @@ class MarketplaceViewSet(viewsets.ReadOnlyModelViewSet):
                 "product__product_type",
                 "product__category",
                 "product__registration",
+                "product__manufacturer",
                 "price_uom",
             )
-            .prefetch_related("product__units")
+            .prefetch_related("product__units", "product__images")
             .annotate(
                 # The buyer sees what the depot offered, less what is
                 # already committed — never the depot's true balance.
@@ -320,9 +321,35 @@ class PurchaseOrderViewSet(
         order.refresh_from_db()
         return Response(PurchaseOrderSerializer(order).data)
 
+    @action(detail=True, methods=["post"], url_path="request-approval")
+    def request_approval(self, request, pk=None):
+        """The pharmacist sends their draft for internal release.
+
+        The order does not reach the depot here. Somebody in the buying
+        pharmacy with the authority to commit money releases it, and
+        that is a different person and a different step — collapsing the
+        two would let anyone who can raise an order also spend against
+        it.
+        """
+        order = services.request_approval(
+            order=self.get_object(), performed_by=request.user
+        )
+        return Response(PurchaseOrderSerializer(order).data)
+
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
+        """The owner or manager approves, which sends it to the depot."""
         order = services.submit_order(order=self.get_object(), performed_by=request.user)
+        return Response(PurchaseOrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        """Sent back to the raiser, with a reason they can answer."""
+        order = services.reject_order(
+            order=self.get_object(),
+            performed_by=request.user,
+            reason=request.data.get("reason", ""),
+        )
         return Response(PurchaseOrderSerializer(order).data)
 
     @action(detail=True, methods=["post"])

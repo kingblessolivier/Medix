@@ -12,6 +12,8 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
+
+from core.permissions import TenantScoped
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -260,7 +262,7 @@ class StockActionView(APIView):
     that writes a balance.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def post(self, request, action: str):
         handlers = {
@@ -357,7 +359,7 @@ class BatchTraceView(APIView):
     means knowing how far the batch travelled.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantScoped]
 
     def get(self, request, batch_id):
         return Response(

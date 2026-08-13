@@ -91,7 +91,7 @@ export function NotificationBell({
         aria-expanded={open}
         className="relative text-text-2 hover:text-text"
       >
-        <Bell size={17} strokeWidth={1.8} />
+        <Bell size={17} strokeWidth={1.8} aria-hidden />
         {total > 0 && (
           /* The dot carries a count, and the count carries the number —
              colour is never the only signal. */

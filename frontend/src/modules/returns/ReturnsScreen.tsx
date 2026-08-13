@@ -99,7 +99,7 @@ function CustomerReturns() {
               icon={Search}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Sale number or product"
+              placeholder="Sale or product"
             />
           )}
         </Field>
@@ -208,7 +208,7 @@ function CustomerReturnModal({
             pack is still safe to dispense, and a default would make it
             for the pharmacist. */}
         <Field
-          label="Put back into stock"
+          label="Restock"
           help="Only if the pack is intact and its storage is known."
           required
         >

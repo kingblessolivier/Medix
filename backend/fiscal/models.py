@@ -15,7 +15,7 @@ from __future__ import annotations
 from django.db import models
 from django.utils import timezone
 
-from core.models import BaseModel, TenantModel
+from core.models import BaseModel
 
 
 class FiscalStatus(models.TextChoices):

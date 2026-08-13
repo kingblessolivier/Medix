@@ -200,7 +200,7 @@ export function ImportReceiptScreen({ locationId }: { locationId: string | null 
         actions={
           <Button
             variant="primary"
-            icon={<PackagePlus size={16} strokeWidth={1.9} />}
+            icon={<PackagePlus size={16} strokeWidth={1.9} aria-hidden />}
             loading={post.isPending}
             disabled={!ready}
             onClick={() => post.mutate()}
@@ -439,7 +439,7 @@ function LineGrid({
               </td>
               <td className="px-3 py-2.5">
                 <Input
-                  placeholder="Batch no."
+                  placeholder="Batch number"
                   aria-label={`Batch number, ${d.productName}`}
                   value={d.batch}
                   onChange={(e) => patch(d.key, { batch: e.target.value })}
@@ -477,7 +477,7 @@ function LineGrid({
                   onClick={() => onChange(resolved.filter((x) => x.key !== d.key))}
                   className="rounded-sm p-1 text-text-3 transition-colors hover:bg-hover hover:text-bad-text"
                 >
-                  <Trash2 size={15} strokeWidth={1.8} />
+                  <Trash2 size={15} strokeWidth={1.8} aria-hidden />
                 </button>
               </td>
             </tr>
@@ -513,7 +513,7 @@ function Posted({ receipt, onDone }: { receipt: GoodsReceipt; onDone: () => void
         title={receipt.number}
         description="Consignment received"
         actions={
-          <Button variant="primary" icon={<Plus size={16} strokeWidth={2} />} onClick={onDone}>
+          <Button variant="primary" icon={<Plus size={16} strokeWidth={2} aria-hidden />} onClick={onDone}>
             New receipt
           </Button>
         }
