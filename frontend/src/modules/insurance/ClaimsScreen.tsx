@@ -159,6 +159,7 @@ function ClaimModal({ claim, onClose }: { claim: Claim | null; onClose: () => vo
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
   const [failure, setFailure] = useState("");
+  const [responding, setResponding] = useState(false);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["claims"] });
@@ -190,6 +191,9 @@ function ClaimModal({ claim, onClose }: { claim: Claim | null; onClose: () => vo
   if (!claim) return null;
   const status = STATUS[claim.status] ?? STATUS.DRAFT;
   const submittable = claim.status === "DRAFT" || claim.status === "REJECTED";
+  /* A claim sat at SUBMITTED forever: the receivable never cleared and
+     nothing recorded which line the scheme refused. */
+  const awaiting = claim.status === "SUBMITTED" || claim.status === "RESUBMITTED";
 
   const lineColumns: Column<ClaimLine>[] = [
     { key: "product", header: "Product", render: (l) => l.product_name },
@@ -245,6 +249,10 @@ function ClaimModal({ claim, onClose }: { claim: Claim | null; onClose: () => vo
           >
             {claim.status === "REJECTED" ? "Resubmit" : "Submit claim"}
           </Button>
+        ) : awaiting && !responding ? (
+          <Button variant="primary" className="w-full" onClick={() => setResponding(true)}>
+            Record response
+          </Button>
         ) : undefined
       }
     >
@@ -281,6 +289,16 @@ function ClaimModal({ claim, onClose }: { claim: Claim | null; onClose: () => vo
       />
 
       <h3 className="mb-2 mt-6 text-section font-semibold">Lines</h3>
+      {responding && (
+        <ResponsePanel
+          claim={claim}
+          onDone={() => {
+            setResponding(false);
+            refresh();
+          }}
+        />
+      )}
+
       <DataTable
         columns={lineColumns}
         rows={claim.lines}
@@ -389,5 +407,141 @@ function Receivables() {
         emptyBody="Every submitted claim has been settled."
       />
     </>
+  );
+}
+
+
+/* What the scheme actually allowed, line by line.
+ *
+ * Per line rather than in total because a partial rejection is the
+ * common case: "they paid 28,000 of 45,000" tells a pharmacy nothing
+ * about which line to fix or resubmit. Each line is either allowed an
+ * amount or refused with a reason, and the reason is required — a
+ * rejection nobody explained is one nobody can answer. */
+function ResponsePanel({ claim, onDone }: { claim: Claim; onDone: () => void }) {
+  const [allowed, setAllowed] = useState<Record<string, string>>(() =>
+    Object.fromEntries(claim.lines.map((l) => [l.id, String(l.covered_amount)])),
+  );
+  const [rejections, setRejections] = useState<Record<string, string>>({});
+  const [reference, setReference] = useState("");
+  const [failure, setFailure] = useState("");
+
+  const respond = useMutation({
+    mutationFn: () =>
+      api.respondToClaim(claim.id, {
+        allowed: Object.fromEntries(
+          Object.entries(allowed)
+            .filter(([id]) => !rejections[id])
+            .map(([id, value]) => [id, Number(value) || 0]),
+        ),
+        rejections,
+        scheme_reference: reference,
+      }),
+    onSuccess: onDone,
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Not recorded.",
+      ),
+  });
+
+  function toggleRejection(id: string) {
+    setRejections((current) => {
+      const next = { ...current };
+      if (id in next) delete next[id];
+      else next[id] = "";
+      return next;
+    });
+  }
+
+  const unexplained = Object.entries(rejections).filter(([, why]) => !why.trim());
+
+  return (
+    <section className="mb-5 rounded-md border border-info bg-info-bg p-3">
+      <p className="mb-2 text-body font-medium text-text">What the scheme allowed</p>
+
+      {failure && (
+        <Banner tone="bad" className="mb-3">
+          {failure}
+        </Banner>
+      )}
+
+      <ul className="flex flex-col divide-y divide-hair">
+        {claim.lines.map((line) => {
+          const rejected = line.id in rejections;
+          return (
+            <li key={line.id} className="py-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0 flex-1 truncate text-body text-text">
+                  {line.product_name}
+                  <span className="ml-2 text-help text-text-3">
+                    claimed {MONEY.format(line.covered_amount)}
+                  </span>
+                </span>
+                {rejected ? (
+                  <Button variant="secondary" onClick={() => toggleRejection(line.id)}>
+                    Undo
+                  </Button>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <Input
+                      aria-label={`Allowed for ${line.product_name}`}
+                      type="number"
+                      min={0}
+                      value={allowed[line.id] ?? ""}
+                      onChange={(e) =>
+                        setAllowed((c) => ({ ...c, [line.id]: e.target.value }))
+                      }
+                      className="w-28 tabular text-right"
+                    />
+                    <Button variant="secondary" onClick={() => toggleRejection(line.id)}>
+                      Refused
+                    </Button>
+                  </span>
+                )}
+              </div>
+              {rejected && (
+                <div className="mt-2">
+                  <Input
+                    aria-label={`Why ${line.product_name} was refused`}
+                    value={rejections[line.id]}
+                    onChange={(e) =>
+                      setRejections((c) => ({ ...c, [line.id]: e.target.value }))
+                    }
+                    placeholder="Not covered"
+                    invalid={!rejections[line.id].trim()}
+                  />
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="mt-3 flex flex-col gap-3">
+        <Field label="Scheme reference" help="What they called it on the remittance.">
+          {(id) => (
+            <Input
+              id={id}
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+            />
+          )}
+        </Field>
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onDone}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            className="flex-1"
+            disabled={unexplained.length > 0}
+            loading={respond.isPending}
+            onClick={() => respond.mutate()}
+          >
+            Record response
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }

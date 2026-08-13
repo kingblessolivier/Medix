@@ -28,6 +28,7 @@ import {
   Store,
   Tag,
   ShieldCheck,
+  ShieldPlus,
   Sparkles,
   Snowflake,
   Sun,
@@ -108,6 +109,9 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
       items: [
         { id: "prescriptions", label: "Prescriptions", icon: ClipboardList },
         { id: "claims", label: "Claims", icon: HeartPulse },
+        // Without a contract no cover is ever found, and every
+        // insured patient is charged in full without a word.
+        { id: "schemes", label: "Insurance", icon: ShieldPlus },
       ],
     });
   }

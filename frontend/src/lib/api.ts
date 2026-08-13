@@ -542,6 +542,79 @@ export type BatchTrace = {
   on_hand_base: number;
 };
 
+export type SchemeContract = {
+  id: string;
+  scheme: string;
+  scheme_name: string;
+  reference: string;
+  /** FEE_FOR_SERVICE claims per sale; CAPITATION is paid per period. */
+  model: string;
+  model_label: string;
+  claims_per_sale: boolean;
+  is_contracted: boolean;
+  claim_window_days: number;
+  payment_terms_days: number;
+  capitation_amount: number | null;
+  capitation_period: string;
+  effective_from: string;
+  effective_to: string | null;
+};
+
+export type CoverageRule = {
+  id: string;
+  contract: string;
+  /** What the rule applies to: everything, a category, one product. */
+  scope: string;
+  scope_label: string;
+  product: string | null;
+  product_name: string;
+  category: string | null;
+  category_name: string;
+  legal_status: string;
+  /** Basis points, never a float. 8000 is 80%. */
+  coverage_basis_points: number;
+  maximum_amount: number | null;
+  is_excluded: boolean;
+  requires_prescription: boolean;
+  effective_from: string;
+  effective_to: string | null;
+};
+
+export type Member = {
+  id: string;
+  patient: string;
+  patient_name: string;
+  scheme: string;
+  scheme_name: string;
+  member_number: string;
+  principal_name: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  is_active: boolean;
+  is_currently_valid: boolean;
+};
+
+export type ImportDocument = {
+  id: string;
+  kind: string;
+  kind_label: string;
+  receipt: string;
+  batch: string | null;
+  batch_number: string;
+  number: string;
+  issued_by: string;
+  issued_on: string | null;
+  expires_on: string | null;
+  file: string | null;
+  /** Somebody looked at it and says it is what it claims to be. */
+  is_verified: boolean;
+  verified_at: string | null;
+  min_temperature_c: string | null;
+  max_temperature_c: string | null;
+  /** A recorded breach quarantines the consignment rather than warning. */
+  breach: boolean;
+};
+
 /* -- tills, shifts and day end ------------------------------------------ */
 
 export type Till = {
@@ -1208,10 +1281,6 @@ export const api = {
   orders: () => request<Paginated<PurchaseOrder>>("/purchase-orders/"),
   order: (id: string) => request<PurchaseOrder>(`/purchase-orders/${id}/`),
   fulfilment: () => request<Paginated<PurchaseOrder>>("/purchase-orders/fulfilment/"),
-  startOrder: (body: { supplier: string; deliver_to: string }) =>
-    request<PurchaseOrder>("/purchase-orders/", { method: "POST", body }),
-  /* The open draft for this supplier, opened if there isn't one — so
-     adding from the marketplace builds one order, not one per click. */
   openDraft: (body: { supplier: string; deliver_to: string }) =>
     request<PurchaseOrder>("/purchase-orders/draft/", { method: "POST", body }),
   addOrderLine: (
@@ -1246,10 +1315,6 @@ export const api = {
 
   dispatchOrder: (id: string, body: { from_location: string; carrier?: string }) =>
     request<Shipment>(`/purchase-orders/${id}/dispatch_order/`, { method: "POST", body }),
-  shipments: (id: string) => request<Shipment[]>(`/purchase-orders/${id}/shipments/`),
-
-  receipts: () => request<Paginated<GoodsReceipt>>("/goods-receipts/"),
-  /** The draft a supplier's advance notice already seeded, if any. */
   draftReceiptFor: (orderId: string) =>
     request<Paginated<GoodsReceipt>>(
       `/goods-receipts/?order=${orderId}&status=DRAFT`,
@@ -1281,8 +1346,6 @@ export const api = {
     }),
   setLandedCost: (id: string, body: LandedCost) =>
     request<GoodsReceipt>(`/goods-receipts/${id}/landed-cost/`, { method: "POST", body }),
-  landedCostPreview: (id: string) =>
-    request<Record<string, number>>(`/goods-receipts/${id}/landed-cost-preview/`),
   postReceipt: (id: string) =>
     request<GoodsReceipt>(`/goods-receipts/${id}/post_receipt/`, { method: "POST", body: {} }),
   discrepancies: (id: string) =>
@@ -1291,10 +1354,6 @@ export const api = {
   /* -- documents ------------------------------------------------------- */
 
   documents: (params = "") => request<Paginated<MedixDocument>>(`/documents/${params}`),
-  documentsFor: (subjectId: string) =>
-    request<Paginated<MedixDocument>>(`/documents/?subject=${subjectId}`),
-  /* Everything one transaction produced — the delivery note on its
-     shipment, the invoice on its invoice, the GRN on its receipt. */
   documentsAbout: (transactionId: string) =>
     request<Paginated<MedixDocument>>(`/documents/?related=${transactionId}`),
   /** The stored HTML, not a re-render — preview and print cannot diverge. */
@@ -1309,10 +1368,6 @@ export const api = {
   financeDashboard: (params: { start: string; end: string; tier: string }) =>
     request<DashboardPayload>(
       `/finance/dashboard/?start=${params.start}&end=${params.end}&tier=${params.tier}`,
-    ),
-  financePeriod: (params: { start: string; end: string; tier: string }) =>
-    request<PeriodReport>(
-      `/finance/period/?start=${params.start}&end=${params.end}&tier=${params.tier}`,
     ),
   receivables: () => request<ReceivablesAgeing>("/finance/receivables/"),
 
@@ -1490,6 +1545,62 @@ export const api = {
   colleagues: () => request<Paginated<Colleague>>("/colleagues/"),
   /* A licence is issued to a branch, not to an organization. */
   branches: () => request<Paginated<Branch>>("/branches/"),
+
+  /* -- insurance setup ----------------------------------------------------
+
+     Without a contract no cover is ever found, so every insured patient
+     is charged in full — silently. See insurance/services.py. */
+  saveScheme: (body: Partial<Scheme>, id?: string) =>
+    request<Scheme>(id ? `/schemes/${id}/` : "/schemes/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+  schemeContracts: () => request<Paginated<SchemeContract>>("/scheme-contracts/"),
+  saveSchemeContract: (body: Partial<SchemeContract>, id?: string) =>
+    request<SchemeContract>(
+      id ? `/scheme-contracts/${id}/` : "/scheme-contracts/",
+      { method: id ? "PATCH" : "POST", body },
+    ),
+  coverageRules: (contractId?: string) =>
+    request<Paginated<CoverageRule>>(
+      contractId ? `/coverage-rules/?contract=${contractId}` : "/coverage-rules/",
+    ),
+  saveCoverageRule: (body: Partial<CoverageRule>, id?: string) =>
+    request<CoverageRule>(id ? `/coverage-rules/${id}/` : "/coverage-rules/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+  members: (search = "") =>
+    request<Paginated<Member>>(`/members/?search=${encodeURIComponent(search)}`),
+  saveMember: (body: Partial<Member>, id?: string) =>
+    request<Member>(id ? `/members/${id}/` : "/members/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+
+  /* -- import paper -------------------------------------------------------
+
+     Two of these are gates rather than filing: a Certificate of Analysis
+     releases a batch, and a cold-chain log with a breach holds one. See
+     commerce.services._quarantine_reason. */
+  importDocuments: (receiptId: string) =>
+    request<Paginated<ImportDocument>>(`/import-documents/?receipt=${receiptId}`),
+  saveImportDocument: (body: {
+    receipt: string;
+    kind: string;
+    number?: string;
+    issued_by?: string;
+    issued_on?: string | null;
+    batch?: string | null;
+    min_temperature_c?: string | null;
+    max_temperature_c?: string | null;
+    breach?: boolean;
+  }) => request<ImportDocument>("/import-documents/", { method: "POST", body }),
+  verifyImportDocument: (id: string) =>
+    request<ImportDocument>(`/import-documents/${id}/verify/`, {
+      method: "POST",
+      body: {},
+    }),
 
   /* -- a depot's own listings --------------------------------------------
 

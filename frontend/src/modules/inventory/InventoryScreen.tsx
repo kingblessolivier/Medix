@@ -18,6 +18,7 @@ import {
   ErrorState,
   Field,
   Input,
+  Select,
   PageHeader,
   StatusDot,
   StatusPill,
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui";
 import { DetailList, Modal } from "@/components/ui/Modal";
 import { Consequence } from "@/components/ui/Guidance";
+import { Trash2 } from "lucide-react";
 import { AlertStack } from "@/components/ui/AlertStack";
 
 /** Expiry banding. Status is never colour alone — the dot carries a label. */
@@ -187,6 +189,7 @@ function BatchModal({ row, onClose }: { row: StockRow | null; onClose: () => voi
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
   const [failure, setFailure] = useState("");
+  const [disposing, setDisposing] = useState(false);
 
   const movements = useQuery({
     queryKey: ["movements", row?.batch],
@@ -241,7 +244,17 @@ function BatchModal({ row, onClose }: { row: StockRow | null; onClose: () => voi
             Release to available
           </Button>
         ) : (
-          <Button className="w-full">View full history</Button>
+          /* The only way stock leaves for expiry, damage or loss. Without
+             it an expired batch sits in inventory value forever, alerting
+             every day and impossible to dispose of. */
+          <Button
+            variant="danger"
+            className="w-full"
+            icon={<Trash2 size={16} strokeWidth={1.9} aria-hidden />}
+            onClick={() => setDisposing(true)}
+          >
+            Write off
+          </Button>
         )
       }
     >
@@ -287,6 +300,10 @@ function BatchModal({ row, onClose }: { row: StockRow | null; onClose: () => voi
         ]}
       />
 
+      {disposing && (
+        <WriteOffPanel row={row} onDone={() => setDisposing(false)} onClose={onClose} />
+      )}
+
       <h3 className="mb-2 mt-6 text-section font-semibold">Movements</h3>
       {movements.isLoading ? (
         <p className="text-body text-text-2">Loading…</p>
@@ -296,6 +313,135 @@ function BatchModal({ row, onClose }: { row: StockRow | null; onClose: () => voi
         <Ledger movements={movements.data!.results} />
       )}
     </Modal>
+  );
+}
+
+const DISPOSAL_REASONS = [
+  ["EXPIRY", "Expired"],
+  ["DAMAGE", "Damaged"],
+  ["RECALL", "Recalled"],
+  ["LOSS", "Lost or stolen"],
+] as const;
+
+/* Writing stock off, in place rather than in a second modal — a modal
+   never opens another modal, and the batch being disposed of is the one
+   already on screen.
+ *
+ * Witnessed, because the certificate is what an inspector asks for and
+ * one with nobody's name on it is a note. */
+function WriteOffPanel({
+  row,
+  onDone,
+  onClose,
+}: {
+  row: StockRow;
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [quantity, setQuantity] = useState(String(row.quantity_base));
+  const [reason, setReason] = useState<string>(
+    row.days_to_expiry < 0 ? "EXPIRY" : "DAMAGE",
+  );
+  const [witness, setWitness] = useState("");
+  const [role, setRole] = useState("");
+  const [failure, setFailure] = useState("");
+
+  const dispose = useMutation({
+    mutationFn: () =>
+      api.recordWriteOff({
+        batch: row.batch,
+        location: row.location,
+        quantity: Number(quantity),
+        reason,
+        witness_name: witness,
+        witness_role: role,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["stock"] });
+      queryClient.invalidateQueries({ queryKey: ["write-offs"] });
+      onDone();
+      onClose();
+    },
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Not written off.",
+      ),
+  });
+
+  const over = Number(quantity) > row.quantity_base;
+
+  return (
+    <div className="mt-5 rounded-md border border-bad bg-bad-bg p-3">
+      <p className="mb-2 text-body font-medium text-bad-text">Write off</p>
+      <Consequence
+        lines={[
+          "Takes the stock off the shelf through the ledger.",
+          "Records what it cost at this batch's own price.",
+        ]}
+      />
+      {failure && (
+        <Banner tone="bad" className="mt-3">
+          {failure}
+        </Banner>
+      )}
+      <div className="mt-3 flex flex-col gap-3">
+        <Field label="Reason" required>
+          {(id) => (
+            <Select id={id} value={reason} onChange={(e) => setReason(e.target.value)}>
+              {DISPOSAL_REASONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Field label="Quantity" help={`${row.quantity_base.toLocaleString()} held.`} required>
+          {(id) => (
+            <Input
+              id={id}
+              type="number"
+              min={1}
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              invalid={over}
+              className="tabular text-right"
+            />
+          )}
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Witness" help="Who watched it destroyed.">
+            {(id) => (
+              <Input
+                id={id}
+                value={witness}
+                onChange={(e) => setWitness(e.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Their role">
+            {(id) => (
+              <Input id={id} value={role} onChange={(e) => setRole(e.target.value)} />
+            )}
+          </Field>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onDone}>
+            Keep it
+          </Button>
+          <Button
+            variant="danger"
+            className="flex-1"
+            disabled={over || Number(quantity) < 1}
+            loading={dispose.isPending}
+            onClick={() => dispose.mutate()}
+          >
+            Write off
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

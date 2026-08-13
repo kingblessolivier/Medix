@@ -26,6 +26,7 @@ import { AssistantScreen } from "@/modules/assistant/AssistantScreen";
 import { ColdChainScreen } from "@/modules/coldchain/ColdChainScreen";
 import { DayEndScreen } from "@/modules/dayend/DayEndScreen";
 import { ListingsScreen } from "@/modules/listings/ListingsScreen";
+import { SchemesScreen } from "@/modules/insurance/SchemesScreen";
 import { RecallScreen } from "@/modules/recall/RecallScreen";
 import { ReturnsScreen } from "@/modules/returns/ReturnsScreen";
 import { PrescriptionsScreen } from "@/modules/prescriptions/PrescriptionsScreen";
@@ -158,6 +159,8 @@ export default function App() {
           <PharmaciesScreen />
         ) : active === "settings" ? (
           <SettingsScreen />
+        ) : active === "schemes" && canSell ? (
+          <SchemesScreen />
         ) : active === "listings" && canSupply ? (
           <ListingsScreen />
         ) : active === "dayend" && canSell ? (

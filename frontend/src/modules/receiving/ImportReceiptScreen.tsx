@@ -29,9 +29,12 @@ import {
 } from "@/lib/api";
 import { DataTable, type Column } from "@/components/data/DataTable";
 import { Help } from "@/components/ui/Guidance";
+import { Modal } from "@/components/ui/Modal";
 import {
+  Badge,
   Banner,
   Button,
+  Checkbox,
   Field,
   Input,
   PageHeader,
@@ -545,7 +548,212 @@ function Posted({ receipt, onDone }: { receipt: GoodsReceipt; onDone: () => void
         density="compact"
         caption={`Lines on ${receipt.number}`}
       />
+
+      <Paperwork receipt={receipt} />
     </>
+  );
+}
+
+/* Two of these are gates rather than filing.
+ *
+ * A registered medicine imported with no Certificate of Analysis is
+ * quarantined on receipt, and a cold-chain log carrying a breach
+ * quarantines too. Neither could be attached from anywhere in the
+ * product, so a depot's imports held themselves and nothing said why. */
+const IMPORT_KINDS = [
+  ["CERTIFICATE_OF_ANALYSIS", "Certificate of analysis"],
+  ["COLD_CHAIN_LOG", "Cold-chain temperature log"],
+  ["IMPORT_LICENCE", "Import licence or permit"],
+  ["COMMERCIAL_INVOICE", "Commercial invoice"],
+  ["PACKING_LIST", "Packing list"],
+  ["BILL_OF_LADING", "Bill of lading or air waybill"],
+  ["CERTIFICATE_OF_ORIGIN", "Certificate of origin"],
+  ["CUSTOMS_DECLARATION", "Customs import declaration"],
+  ["PROFORMA_INVOICE", "Proforma invoice"],
+] as const;
+
+/** The two that decide whether stock can be sold. */
+const GATES = new Set(["CERTIFICATE_OF_ANALYSIS", "COLD_CHAIN_LOG"]);
+
+function Paperwork({ receipt }: { receipt: GoodsReceipt }) {
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [kind, setKind] = useState<string>("CERTIFICATE_OF_ANALYSIS");
+  const [number, setNumber] = useState("");
+  const [issuedBy, setIssuedBy] = useState("");
+  const [breach, setBreach] = useState(false);
+  const [failure, setFailure] = useState("");
+
+  const documents = useQuery({
+    queryKey: ["import-documents", receipt.id],
+    queryFn: () => api.importDocuments(receipt.id),
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveImportDocument({
+        receipt: receipt.id,
+        kind,
+        number,
+        issued_by: issuedBy,
+        // Covers every batch on this receipt. A per-batch certificate
+        // needs the batch id, and the receipt line carries only its
+        // number — the Batch row is created at posting.
+        batch: null,
+        breach: kind === "COLD_CHAIN_LOG" ? breach : false,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["import-documents", receipt.id] });
+      queryClient.invalidateQueries({ queryKey: ["stock"] });
+      setAdding(false);
+      setNumber("");
+      setIssuedBy("");
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not filed."),
+  });
+
+  const verify = useMutation({
+    mutationFn: (id: string) => api.verifyImportDocument(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["import-documents", receipt.id] }),
+  });
+
+  const rows = documents.data?.results ?? [];
+  const hasCoA = rows.some((d) => d.kind === "CERTIFICATE_OF_ANALYSIS");
+
+  return (
+    <section className="mt-8">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-section font-semibold text-text">Paperwork</h2>
+        <Button variant="secondary" onClick={() => setAdding(true)}>
+          Attach document
+        </Button>
+      </div>
+
+      {!hasCoA && (
+        <Banner tone="warn" className="mb-3">
+          No certificate of analysis. Registered medicines stay held.
+        </Banner>
+      )}
+
+      {failure && (
+        <Banner tone="bad" className="mb-3">
+          {failure}
+        </Banner>
+      )}
+
+      {rows.length === 0 ? (
+        <p className="text-body text-text-2">Nothing filed.</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-hair border-y border-hair">
+          {rows.map((document) => (
+            <li
+              key={document.id}
+              className="flex items-baseline justify-between gap-3 py-2"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-body text-text">
+                  {document.kind_label}
+                  {GATES.has(document.kind) && (
+                    <span className="ml-2 text-help text-text-3">releases stock</span>
+                  )}
+                </span>
+                <span className="block truncate font-mono text-help text-text-3">
+                  {document.number || "no number"}
+                  {document.batch_number && ` · ${document.batch_number}`}
+                </span>
+              </span>
+              <span className="flex items-center gap-2">
+                {document.breach && <Badge tone="bad">Breach</Badge>}
+                {document.is_verified ? (
+                  <Badge tone="ok">Verified</Badge>
+                ) : (
+                  <Button variant="secondary" onClick={() => verify.mutate(document.id)}>
+                    Verify
+                  </Button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {adding && (
+        <Modal
+          open
+          title="Attach document"
+          subtitle={receipt.number}
+          onClose={() => setAdding(false)}
+          footer={
+            <Button
+              variant="primary"
+              className="w-full"
+              loading={save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Attach
+            </Button>
+          }
+        >
+          <div className="flex flex-col gap-4">
+            <Field label="Document" required>
+              {(id) => (
+                <Select id={id} value={kind} onChange={(e) => setKind(e.target.value)}>
+                  {IMPORT_KINDS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+
+            {kind === "CERTIFICATE_OF_ANALYSIS" && (
+              <Banner tone="info">
+                Releases every batch on this receipt.
+              </Banner>
+            )}
+
+            <Field label="Number">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={number}
+                  onChange={(e) => setNumber(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Issued by">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={issuedBy}
+                  onChange={(e) => setIssuedBy(e.target.value)}
+                />
+              )}
+            </Field>
+
+            {kind === "COLD_CHAIN_LOG" && (
+              <>
+                {/* Recorded, not warned about: by the time anyone reads a
+                    warning the product is already damaged. */}
+                <Checkbox
+                  checked={breach}
+                  onChange={setBreach}
+                  label="Shows a breach"
+                />
+                {breach && (
+                  <Banner tone="bad">
+                    Holds the whole consignment. Nothing ships until reviewed.
+                  </Banner>
+                )}
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
+    </section>
   );
 }
 

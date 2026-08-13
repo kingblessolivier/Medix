@@ -903,3 +903,62 @@ rendered from, so it is the document rather than an approximation of it.
 The frame is sandboxed with scripts blocked. A document is the one place
 product and patient text reaches a browser as markup — Django escapes
 every value, and the sandbox is the second lock rather than the first.
+
+
+---
+
+## Stage 16 — Closing the open list
+
+The four items the previous pass flagged and left. Each had a complete,
+tested service behind it and no way to reach it.
+
+**Expired stock could never leave the shelf.**
+`finance.services.write_off()` is the only path that removes it from the
+ledger, and `api.recordWriteOff` had no caller. An expired batch sat in
+inventory value forever, alerting every day and impossible to dispose of.
+It belongs on the batch rather than on a finance screen — the person
+deciding is holding the box. Witnessed, because the certificate is what
+an inspector asks for and one with nobody's name on it is a note.
+
+**Import paper could not be filed, and two pieces of it are gates.** A
+registered medicine imported without a Certificate of Analysis is
+quarantined on receipt, and a cold-chain log carrying a breach quarantines
+too — `_quarantine_reason` refuses to release either. So a depot's
+imports held themselves and nothing said why. Filed on the posted
+receipt rather than during entry, deliberately: you find out you need a
+certificate *after* posting, when the stock turns up held, and asking for
+it earlier asks at the one moment nobody yet knows whether it matters.
+
+**Insurance could be read and not set up.** Without a contract
+`check_eligibility` finds no cover, so every insured patient was charged
+in full — no error, no warning, no claim. The Claims screen read "No
+claims" forever and nothing hinted that a setup step was missing, which
+is the worst shape a gap can take: it looks like the pharmacy has no
+insurance business. Schemes, contracts and coverage rules are writable
+now, with capitation shown for what it is — a contract that raises no
+claims because the scheme has already paid for the period.
+
+**A submitted claim never resolved.** `record_response()` records what
+the scheme allowed line by line and had no caller, so the receivable
+never cleared and nothing recorded which line was refused. Per line
+because a partial rejection is the common case: *they paid 28,000 of
+45,000* does not tell a pharmacy what to fix.
+
+The enum guard now covers the five new constant lists as well. It has
+caught four inventions so far and none since.
+
+Two things the closing pass caught in its own work. Insurance setup is
+not finished at a contract: eligibility matches a patient to a scheme
+through a `Member` row, so a scheme and a contract with no members charge
+every patient in full exactly as before — the wrapper was written and
+uncalled, which would have been the same gap one layer down. And the
+listings table reported how many volume breaks a listing had against a
+table only `seed_market` could write.
+
+Seven client wrappers superseded by other calls were deleted rather than
+surfaced — `documentsFor`, `financePeriod`, `receipts`, `shipments`,
+`startOrder`, `landedCostPreview`, `eligibility`. Keeping them is what
+made the parity audit necessary. Three are left on purpose:
+`recordAllergy`, `saveControlledQuota` and `saveTaxRule` mark real
+missing features, and deleting them would hide the gap rather than close
+it.
