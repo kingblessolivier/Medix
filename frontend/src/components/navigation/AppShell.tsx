@@ -9,7 +9,6 @@
 import clsx from "clsx";
 import {
   ArrowLeftRight,
-  Bell,
   BookOpen,
   Building2,
   ChartNoAxesCombined,
@@ -35,6 +34,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+
+import { NotificationBell } from "./NotificationBell";
 
 export type NavItem = { id: string; label: string; icon: LucideIcon };
 export type NavGroup = { label: string; items: NavItem[] };
@@ -166,7 +167,12 @@ export function AppShell({
         organizationName={organizationName}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar userName={userName} onSignOut={onSignOut} onSearch={onSearch} />
+        <TopBar
+          userName={userName}
+          onSignOut={onSignOut}
+          onSearch={onSearch}
+          onNavigate={onNavigate}
+        />
         <main className="mx-auto w-full max-w-content flex-1 p-6">{children}</main>
         <StatusBar />
       </div>
@@ -243,10 +249,12 @@ function TopBar({
   userName,
   onSignOut,
   onSearch,
+  onNavigate,
 }: {
   userName?: string;
   onSignOut?: () => void;
   onSearch?: () => void;
+  onNavigate?: (id: string) => void;
 }) {
   return (
     /* Disappears into the environment — same neutral family as the
@@ -268,9 +276,7 @@ function TopBar({
 
       <div className="ml-auto flex items-center gap-3">
         <ThemeToggle />
-        <button type="button" aria-label="Notifications" className="text-text-2 hover:text-text">
-          <Bell size={17} strokeWidth={1.8} />
-        </button>
+        <NotificationBell onNavigate={onNavigate} />
         <button
           type="button"
           onClick={onSignOut}

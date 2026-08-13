@@ -116,7 +116,12 @@ VAT classification for the full product mix · GS1 mandate dates for Rwanda · c
 
 ## Phase 6 — Compliance and cold chain
 
-*Can run in parallel with 4–5; grouped here because it shares a reviewer.*
+**Built**, except the sensor half. Licence and registration expiry
+alerting, the compliance dashboard, automatic quarantine on a recorded
+cold-chain breach, the recall console with per-location execution and
+full trace, witnessed disposal with a certificate, and GS1 DataMatrix
+parsing all exist. What remains is live temperature capture from a
+device, which needs the local agent.
 
 - Premises licences and pharmacist registrations with expiry alerting
 - Compliance dashboard
@@ -133,7 +138,10 @@ VAT classification for the full product mix · GS1 mandate dates for Rwanda · c
 
 ## Phase 7 — Intelligence
 
-*Only meaningful once phases 1–4 have generated real data.*
+**Built.** Margin by category and product from batch cost, best sellers
+by units, slow movers sorted never-sold first, stock-outs inferred from
+demand against holding, and the performance dashboard. Vendor price-change
+alerting and the accounting export remain.
 
 - Margin by category, product, branch — computed from batch cost
 - Vendor profitability and price-change alerting
@@ -147,6 +155,10 @@ VAT classification for the full product mix · GS1 mandate dates for Rwanda · c
 ---
 
 ## Phase 8 — Assistant and polish
+
+**Partly built:** the command palette and global search across products,
+batches, orders, invoices, documents, pharmacies and patients. The
+Assistant, the copy pass and the accessibility audit remain.
 
 - Command palette with actions
 - Global search across products, orders, invoices, patients, prescriptions, suppliers, batches, documents
