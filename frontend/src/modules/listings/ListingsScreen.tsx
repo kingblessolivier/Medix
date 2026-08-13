@@ -59,6 +59,7 @@ export function ListingsScreen() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [pricing, setPricing] = useState<MarketplaceRow | null>(null);
   const [failure, setFailure] = useState("");
 
   const listings = useQuery({
@@ -152,6 +153,7 @@ export function ListingsScreen() {
   ];
 
   const rowActions: RowAction<MarketplaceRow>[] = [
+    { label: "Volume price", onSelect: setPricing },
     {
       label: "Withdraw",
       onSelect: (r) => withdraw.mutate(r.id),
@@ -216,6 +218,7 @@ export function ListingsScreen() {
       />
 
       {publishing && <PublishModal onClose={() => setPublishing(false)} />}
+      {pricing && <TiersModal listing={pricing} onClose={() => setPricing(null)} />}
     </>
   );
 }
@@ -447,6 +450,156 @@ function PublishModal({ onClose }: { onClose: () => void }) {
           </Field>
         </div>
       )}
+    </Modal>
+  );
+}
+
+
+/* Volume breaks — buy more, pay less each.
+ *
+ * Thresholds are in the unit the depot prices in, and the marketplace
+ * detail already quotes them back to a buyer along with how much more to
+ * add for the next one. It was reading a table nothing could write.
+ *
+ * Replaced wholesale rather than edited row by row: a break list is one
+ * decision, and half-applied changes would leave a price nobody chose. */
+function TiersModal({
+  listing,
+  onClose,
+}: {
+  listing: MarketplaceRow;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [tiers, setTiers] = useState<{ min_quantity: string; price: string }[]>(() =>
+    listing.tiers.length > 0
+      ? listing.tiers.map((t) => ({
+          min_quantity: String(t.min_quantity),
+          price: String(t.price),
+        }))
+      : [{ min_quantity: "", price: "" }],
+  );
+  const [failure, setFailure] = useState("");
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.setPriceTiers(
+        listing.id,
+        tiers
+          .filter((t) => t.min_quantity && t.price)
+          .map((t) => ({
+            min_quantity: Number(t.min_quantity),
+            price: Number(t.price),
+          })),
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-listings"] });
+      queryClient.invalidateQueries({ queryKey: ["marketplace"] });
+      onClose();
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not saved."),
+  });
+
+  const unit = listing.uom_code.toLowerCase();
+
+  return (
+    <Modal
+      open
+      title="Volume price"
+      subtitle={listing.product_name}
+      onClose={onClose}
+      footer={
+        <Button
+          variant="primary"
+          className="w-full"
+          loading={save.isPending}
+          onClick={() => save.mutate()}
+        >
+          Save breaks
+        </Button>
+      }
+    >
+      <Consequence
+        lines={[
+          `Replaces every break on this listing.`,
+          `Thresholds are in ${unit}, the unit you price in.`,
+        ]}
+      />
+      {failure && (
+        <Banner tone="bad" className="mt-3">
+          {failure}
+        </Banner>
+      )}
+
+      <p className="mt-4 text-help text-text-2">
+        {`1+ ${unit} · ${MONEY.format(listing.price)}`}
+      </p>
+
+      <div className="mt-2 flex flex-col gap-2">
+        {tiers.map((tier, index) => (
+          <div key={index} className="flex items-end gap-2">
+            <div className="flex-1">
+              <Field label={index === 0 ? "From" : ""}>
+                {(id) => (
+                  <Input
+                    id={id}
+                    type="number"
+                    min={2}
+                    value={tier.min_quantity}
+                    onChange={(e) =>
+                      setTiers((current) =>
+                        current.map((row, i) =>
+                          i === index ? { ...row, min_quantity: e.target.value } : row,
+                        ),
+                      )
+                    }
+                    className="tabular text-right"
+                  />
+                )}
+              </Field>
+            </div>
+            <div className="flex-1">
+              <Field label={index === 0 ? "Each" : ""}>
+                {(id) => (
+                  <Input
+                    id={id}
+                    type="number"
+                    min={0}
+                    value={tier.price}
+                    onChange={(e) =>
+                      setTiers((current) =>
+                        current.map((row, i) =>
+                          i === index ? { ...row, price: e.target.value } : row,
+                        ),
+                      )
+                    }
+                    className="tabular text-right"
+                  />
+                )}
+              </Field>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                setTiers((current) => current.filter((_, i) => i !== index))
+              }
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <Button
+        variant="secondary"
+        className="mt-3"
+        onClick={() =>
+          setTiers((current) => [...current, { min_quantity: "", price: "" }])
+        }
+      >
+        Add break
+      </Button>
     </Modal>
   );
 }

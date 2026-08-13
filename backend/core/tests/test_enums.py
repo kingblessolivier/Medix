@@ -54,6 +54,31 @@ MIRRORS = [
         "TAX",
         "catalog.models.TaxTreatment",
     ),
+    (
+        "modules/insurance/SchemesScreen.tsx",
+        "MODELS",
+        "insurance.models.ReimbursementModel",
+    ),
+    (
+        "modules/insurance/SchemesScreen.tsx",
+        "PERIODS",
+        "insurance.models.CapitationPeriod",
+    ),
+    (
+        "modules/insurance/SchemesScreen.tsx",
+        "SCOPES",
+        "insurance.models.CoverageScope",
+    ),
+    (
+        "modules/inventory/InventoryScreen.tsx",
+        "DISPOSAL_REASONS",
+        "finance.models.WriteOffReason",
+    ),
+    (
+        "modules/receiving/ImportReceiptScreen.tsx",
+        "IMPORT_KINDS",
+        "commerce.models.ImportDocumentKind",
+    ),
 ]
 
 
