@@ -6,6 +6,14 @@ from core import alerts_views, sync_views, views
 
 router = DefaultRouter()
 router.register("alert-rules", alerts_views.AlertRuleViewSet, basename="alert-rule")
+router.register("licences", views.PremisesLicenceViewSet, basename="licence")
+router.register(
+    "pharmacist-registrations",
+    views.PharmacistRegistrationViewSet,
+    basename="pharmacist-registration",
+)
+router.register("colleagues", views.ColleagueViewSet, basename="colleague")
+router.register("branches", views.BranchViewSet, basename="branch")
 router.register("devices", sync_views.DeviceViewSet, basename="device")
 router.register("sensors", sync_views.SensorViewSet, basename="sensor")
 router.register("excursions", sync_views.ExcursionViewSet, basename="excursion")

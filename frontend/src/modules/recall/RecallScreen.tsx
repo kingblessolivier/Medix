@@ -224,6 +224,41 @@ function TraceModal({
             />
           </div>
 
+          {/* Where the rest of it is, room by room. "3,700 on shelf"
+              reads the same whether that is one shelf or four branches,
+              and nobody can be sent to fetch a total. */}
+          <h3 className="mb-2 text-section font-semibold">
+            Still on our shelves
+            {found.locations.length > 0 && (
+              <Badge tone="neutral">{found.locations.length}</Badge>
+            )}
+          </h3>
+          {found.locations.length === 0 ? (
+            <p className="mb-5 text-body text-text-2">None held.</p>
+          ) : (
+            <ul className="mb-5 flex flex-col divide-y divide-hair border-y border-hair">
+              {found.locations.map((held) => (
+                <li
+                  key={`${held.location}-${held.status}`}
+                  className="flex items-baseline justify-between gap-3 py-2"
+                >
+                  <span className="text-body text-text">
+                    {held.location}
+                    {held.branch && (
+                      <span className="ml-2 text-help text-text-3">{held.branch}</span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-3">
+                    <span className="text-help text-text-2">{held.status}</span>
+                    <span className="tabular-nums text-body text-text-2">
+                      {held.quantity_base.toLocaleString()}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
           {/* The half of a recall that actually protects anyone. Above
               the stock figures in importance, so it is above them on the
               page too. */}

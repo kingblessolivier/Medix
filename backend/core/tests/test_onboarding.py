@@ -189,3 +189,130 @@ class TestPermission:
         retail = make_org("A Retail Shop", kind=LicenceKind.RETAIL_PHARMACY)
         with pytest.raises(LicenceInvalid):
             require_capability(retail, Capability.PUBLISH_LISTINGS)
+
+
+class TestComplianceCanBeChanged:
+    """A dashboard that reports a lapse and cannot fix it is ignored.
+
+    Both of these were read-only, which meant a pharmacy could see
+    "dispensing: blocked" and had nowhere in the product to record the
+    registration that unblocks it.
+    """
+
+    @pytest.fixture
+    def pharmacy(self, db):
+        from rest_framework.test import APIClient
+
+        from core.models import Branch, Organization, User
+
+        org = Organization.objects.create(name="Kigali Care", primary_kind="RETAIL")
+        branch = Branch.objects.create(organization=org, name="Main", code="MAIN")
+        user = User.objects.create_user(
+            username="marie", password="x", organization=org, first_name="Marie"
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return {"org": org, "branch": branch, "user": user, "client": client}
+
+    def test_a_licence_can_be_recorded(self, pharmacy):
+        from core.models import LicenceKind
+
+        response = pharmacy["client"].post(
+            "/api/v1/licences/",
+            {
+                "branch": str(pharmacy["branch"].id),
+                "kind": LicenceKind.RETAIL_PHARMACY,
+                "number": "RFDA-0001",
+                "issued_on": str(date.today()),
+                "expiry": str(date.today() + timedelta(days=365)),
+            },
+            format="json",
+        )
+        assert response.status_code == 201
+        assert response.data["is_valid"]
+        assert response.data["days_to_expiry"] == 365
+
+    def test_renewing_adds_a_record_rather_than_editing_one(self, pharmacy):
+        """A licence is evidence of what was permitted between two dates."""
+        from core.models import LicenceKind, PremisesLicence
+
+        for number, offset in [("RFDA-0001", -30), ("RFDA-0002", 365)]:
+            pharmacy["client"].post(
+                "/api/v1/licences/",
+                {
+                    "branch": str(pharmacy["branch"].id),
+                    "kind": LicenceKind.RETAIL_PHARMACY,
+                    "number": number,
+                    "issued_on": str(date.today() - timedelta(days=400)),
+                    "expiry": str(date.today() + timedelta(days=offset)),
+                },
+                format="json",
+            )
+        assert PremisesLicence.objects.filter(organization=pharmacy["org"]).count() == 2
+
+    def test_a_registration_can_be_recorded(self, pharmacy):
+        response = pharmacy["client"].post(
+            "/api/v1/pharmacist-registrations/",
+            {
+                "user": str(pharmacy["user"].id),
+                "council_number": "RPC-0114",
+                "issued_on": str(date.today() - timedelta(days=30)),
+                "expiry": str(date.today() + timedelta(days=335)),
+            },
+            format="json",
+        )
+        assert response.status_code == 201
+        assert response.data["is_valid"]
+        assert response.data["user_name"] == "Marie"
+
+    def test_it_unblocks_verifying_a_prescription(self, pharmacy):
+        """The whole point. Without one, nothing can be dispensed at all."""
+        from sales.models import Patient, Prescription
+
+        pharmacy["client"].post(
+            "/api/v1/pharmacist-registrations/",
+            {
+                "user": str(pharmacy["user"].id),
+                "council_number": "RPC-0114",
+                "issued_on": str(date.today() - timedelta(days=30)),
+                "expiry": str(date.today() + timedelta(days=335)),
+            },
+            format="json",
+        )
+        patient = Patient.objects.create(
+            organization=pharmacy["org"], full_name="Aline M."
+        )
+        script = Prescription.objects.create(
+            organization=pharmacy["org"], patient=patient
+        )
+
+        response = pharmacy["client"].post(
+            f"/api/v1/prescriptions/{script.id}/verify/", {}, format="json"
+        )
+        assert response.status_code == 200
+        assert response.data["status"] == "VERIFIED"
+
+    def test_another_tenants_licences_are_invisible(self, pharmacy):
+        from core.models import Branch, LicenceKind, Organization, PremisesLicence
+
+        other = Organization.objects.create(name="ABC", primary_kind="WHOLESALE")
+        other_branch = Branch.objects.create(organization=other, name="Depot", code="DEP")
+        PremisesLicence.objects.create(
+            organization=other,
+            branch=other_branch,
+            kind=LicenceKind.WHOLESALE_PHARMACY,
+            number="RFDA-OTHER",
+            issued_on=date.today(),
+            expiry=date.today() + timedelta(days=365),
+        )
+        response = pharmacy["client"].get("/api/v1/licences/")
+        assert [row["number"] for row in response.data["results"]] == []
+
+    def test_colleagues_are_scoped_to_this_pharmacy(self, pharmacy):
+        from core.models import Organization, User
+
+        other = Organization.objects.create(name="ABC", primary_kind="WHOLESALE")
+        User.objects.create_user(username="jean", password="x", organization=other)
+
+        response = pharmacy["client"].get("/api/v1/colleagues/")
+        assert [row["username"] for row in response.data["results"]] == ["marie"]

@@ -1,4 +1,5 @@
 from django.db import connection
+from django.utils import timezone
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -11,7 +12,14 @@ from rest_framework.views import APIView
 
 from core import onboarding, search as search_service
 from core.capabilities import Capability, require_capability
-from core.models import LicenceKind, PremisesLicence
+from core.models import (
+    Branch,
+    LicenceKind,
+    LicenceStatus,
+    PharmacistRegistration,
+    PremisesLicence,
+    User,
+)
 
 
 @api_view(["GET"])
@@ -232,3 +240,162 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
 
 class ThrottledTokenRefreshView(TokenRefreshView):
     throttle_classes = [AuthThrottle]
+
+
+# --------------------------------------------------------------------------
+# Licences and registrations
+# --------------------------------------------------------------------------
+#
+# Writable, which the compliance dashboard was not. It could report that a
+# premises licence expires in thirty days and offered no way to record the
+# renewal — a screen that trains people to ignore it.
+#
+# The consequence was not cosmetic. Capability derives from held licences,
+# so an expired one silently removes what the pharmacy may do; and
+# verifying a prescription needs a current registration, so a pharmacy with
+# no way to record one could never dispense a prescription-only medicine.
+
+
+class PremisesLicenceSerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source="branch.name", read_only=True)
+    is_valid = serializers.SerializerMethodField()
+    days_to_expiry = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PremisesLicence
+        fields = [
+            "id",
+            "branch",
+            "branch_name",
+            "kind",
+            "number",
+            "issued_on",
+            "expiry",
+            "status",
+            "issuing_authority",
+            "is_valid",
+            "days_to_expiry",
+        ]
+
+    def get_is_valid(self, licence) -> bool:
+        return (
+            licence.status == LicenceStatus.ACTIVE
+            and licence.expiry >= timezone.localdate()
+        )
+
+    def get_days_to_expiry(self, licence) -> int:
+        return (licence.expiry - timezone.localdate()).days
+
+
+class PharmacistRegistrationSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    is_valid = serializers.BooleanField(read_only=True)
+    days_to_expiry = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PharmacistRegistration
+        fields = [
+            "id",
+            "user",
+            "user_name",
+            "council_number",
+            "issued_on",
+            "expiry",
+            "status",
+            "is_valid",
+            "days_to_expiry",
+        ]
+
+    def get_user_name(self, registration) -> str:
+        return registration.user.get_full_name() or registration.user.username
+
+    def get_days_to_expiry(self, registration) -> int:
+        return (registration.expiry - timezone.localdate()).days
+
+
+class PremisesLicenceViewSet(viewsets.ModelViewSet):
+    """Renewing is adding a row, never editing the old one.
+
+    A licence is evidence of what was permitted between two dates.
+    Editing last year's expiry into this year's would erase the fact that
+    there was ever a gap — which is exactly what an inspection asks
+    about. Nothing here prevents an edit, but the screen offers renewal
+    as a new record.
+    """
+
+    serializer_class = PremisesLicenceSerializer
+    permission_classes = [IsAuthenticated, TenantScoped]
+
+    def get_queryset(self):
+        return PremisesLicence.tenant_objects.select_related("branch").order_by("-expiry")
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+    def perform_update(self, serializer):
+        serializer.save(modified_by=self.request.user)
+
+
+class PharmacistRegistrationViewSet(viewsets.ModelViewSet):
+    """Who may dispense, and until when."""
+
+    serializer_class = PharmacistRegistrationSerializer
+    permission_classes = [IsAuthenticated, TenantScoped]
+
+    def get_queryset(self):
+        return PharmacistRegistration.tenant_objects.select_related("user").order_by(
+            "-expiry"
+        )
+
+    def perform_create(self, serializer):
+        serializer.save(
+            organization=self.request.user.organization, created_by=self.request.user
+        )
+
+    def perform_update(self, serializer):
+        serializer.save(modified_by=self.request.user)
+
+
+class ColleagueSerializer(serializers.ModelSerializer):
+    """Who a registration can be attached to."""
+
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ["id", "username", "name"]
+
+    def get_name(self, user) -> str:
+        return user.get_full_name() or user.username
+
+
+class ColleagueViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    serializer_class = ColleagueSerializer
+    permission_classes = [IsAuthenticated, TenantScoped]
+
+    def get_queryset(self):
+        return User.objects.filter(
+            organization=self.request.user.organization, is_active=True
+        ).order_by("username")
+
+
+class BranchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Branch
+        fields = ["id", "name", "code", "is_active"]
+
+
+class BranchViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """The premises this organization operates from.
+
+    Read-only and needed because a licence is issued to a branch, not to
+    an organization — there was no way to name one from the client.
+    """
+
+    serializer_class = BranchSerializer
+    permission_classes = [IsAuthenticated, TenantScoped]
+
+    def get_queryset(self):
+        return Branch.tenant_objects.order_by("code")

@@ -468,6 +468,13 @@ export type BatchTrace = {
   batch: string;
   product: string;
   expiry_date: string;
+  /** Where the rest of it is sitting. A total says how much, not where. */
+  locations: {
+    location: string;
+    branch: string;
+    status: string;
+    quantity_base: number;
+  }[];
   patients: {
     sale: string;
     occurred_at: string;
@@ -484,6 +491,117 @@ export type BatchTrace = {
   dispensed_base: number;
   dispatched_base: number;
   on_hand_base: number;
+};
+
+/* -- licences and registrations ----------------------------------------- */
+
+export type Licence = {
+  id: string;
+  branch: string;
+  branch_name: string;
+  kind: string;
+  number: string;
+  issued_on: string;
+  expiry: string;
+  status: string;
+  issuing_authority: string;
+  /** Active and not past its expiry. Capability follows this. */
+  is_valid: boolean;
+  days_to_expiry: number;
+};
+
+export type Registration = {
+  id: string;
+  user: string;
+  user_name: string;
+  council_number: string;
+  issued_on: string;
+  expiry: string;
+  status: string;
+  /** Without one, nobody in this pharmacy can verify a prescription. */
+  is_valid: boolean;
+  days_to_expiry: number;
+};
+
+export type Colleague = {
+  id: string;
+  username: string;
+  name: string;
+};
+
+export type Branch = {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+};
+
+/* -- the Assistant ------------------------------------------------------ */
+
+export type Answer = {
+  intent: string;
+  /** One line, stating the finding. */
+  headline: string;
+  columns: string[];
+  rows: Record<string, string>[];
+  /** The screen that can act on this. */
+  screen: string;
+  /** Never performed. A person confirms it, or it lapses. */
+  proposal: {
+    id: string;
+    action: string;
+    effect: string;
+    expires_at: string;
+  } | null;
+  /** Where a figure needs qualifying — an estimate, a partial period. */
+  note: string;
+};
+
+export type Proposal = {
+  id: string;
+  question: string;
+  action: string;
+  effect: string;
+  status: string;
+  result: Record<string, unknown> | null;
+  error: string;
+  expires_at: string;
+  decided_at: string | null;
+  is_open: boolean;
+  created_at: string;
+};
+
+/* -- cold chain --------------------------------------------------------- */
+
+export type Excursion = {
+  id: string;
+  sensor: string;
+  sensor_name: string;
+  location_name: string;
+  started_at: string;
+  ended_at: string | null;
+  is_open: boolean;
+  duration_minutes: number;
+  peak_celsius: string;
+  minimum_celsius: string;
+  reading_count: number;
+  /** Base units held automatically when this opened. */
+  quarantined_base: number;
+  batches_affected: number;
+  resolved_at: string | null;
+  resolution: string;
+};
+
+export type Sensor = {
+  id: string;
+  location: string;
+  location_name: string;
+  device_code: string;
+  name: string;
+  minimum_c: string;
+  maximum_c: string;
+  is_active: boolean;
+  last_seen_at: string | null;
 };
 
 /** One thing found, and the screen that opens it. */
@@ -1250,6 +1368,56 @@ export const api = {
       locations: number;
       trace: BatchTrace;
     }>("/stock/recall/", { method: "POST", body }),
+  /* -- licences and registrations ---------------------------------------
+
+     Renewal adds a record rather than editing the old one: a licence is
+     evidence of what was permitted between two dates, and rewriting last
+     year's expiry erases the fact that there was ever a gap. */
+  saveLicence: (body: Partial<Licence>, id?: string) =>
+    request<Licence>(id ? `/licences/${id}/` : "/licences/", {
+      method: id ? "PATCH" : "POST",
+      body,
+    }),
+  saveRegistration: (body: Partial<Registration>, id?: string) =>
+    request<Registration>(
+      id ? `/pharmacist-registrations/${id}/` : "/pharmacist-registrations/",
+      { method: id ? "PATCH" : "POST", body },
+    ),
+  colleagues: () => request<Paginated<Colleague>>("/colleagues/"),
+  /* A licence is issued to a branch, not to an organization. */
+  branches: () => request<Paginated<Branch>>("/branches/"),
+
+  /* -- the Assistant -----------------------------------------------------
+
+     `ask` reads and can suggest; it has no path to a service that
+     writes. `decide` is the only thing that acts, and only on a
+     proposal the server itself wrote. See backend/assistant/services.py. */
+  ask: (question: string) =>
+    request<Answer>("/assistant/ask/", { method: "POST", body: { question } }),
+  decide: (proposalId: string, accepted: boolean, reason = "") =>
+    request<Proposal>(`/assistant/proposals/${proposalId}/decide/`, {
+      method: "POST",
+      body: { accepted, reason },
+    }),
+  proposals: () => request<Paginated<Proposal>>("/proposals/"),
+
+  /* -- cold chain -------------------------------------------------------
+
+     An excursion quarantines stock on its own, which makes it the one
+     alert in the system that acts rather than warns. That also makes it
+     the one a pharmacist most needs to see: stock has gone unsellable
+     and something has to say why, and let somebody decide about it. */
+  excursions: (openOnly = false) =>
+    request<Paginated<Excursion>>(
+      `/excursions/${openOnly ? "?open=true" : ""}`,
+    ),
+  resolveExcursion: (id: string, resolution: string) =>
+    request<Excursion>(`/excursions/${id}/resolve/`, {
+      method: "POST",
+      body: { resolution },
+    }),
+  sensors: () => request<Paginated<Sensor>>("/sensors/"),
+
   releaseBatch: (body: { batch: string; location: string; reason: string }) =>
     request<{ released: boolean }>("/batches/release/", { method: "POST", body }),
   batchTrace: (id: string) => request<BatchTrace>(`/batches/${id}/trace/`),
