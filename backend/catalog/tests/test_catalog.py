@@ -158,3 +158,98 @@ class TestTaxTreatment:
         org = make_org()
         product = make_product(org)
         assert product.tax_treatment == TaxTreatment.EXEMPT
+
+
+class TestTheTillCanSeeTheShelf:
+    """The product list carries what is on hand, because the till reads it.
+
+    A cashier searching "paracetamol" gets several products that look
+    alike. Which of them can actually be sold is the thing that separates
+    them, and finding that out by tapping one and reading a red banner is
+    a conversation with the patient that should not have to happen.
+    """
+
+    @pytest.fixture
+    def counter(self, db):
+        from core.models import User
+        from core.quantity import Quantity
+        from inventory import services
+        from inventory.models import MovementKind, StockStatus
+        from inventory.tests.factories import make_batch, make_location, make_product, uom
+        from rest_framework.test import APIClient
+
+        org = make_org("Kigali Care")
+        user = User.objects.create_user(username="marie", password="x", organization=org)
+        location = make_location(org)
+
+        stocked = make_product(org, "Paracetamol 500mg tablets")
+        empty = make_product(org, "Paracetamol 120mg/5ml syrup")
+        held = make_product(org, "Paracetamol 250mg suppository")
+
+        batch = make_batch(org, stocked, number="PAR-1")
+        services.post_movement(
+            organization=org, location=location, batch=batch,
+            kind=MovementKind.PURCHASE_RECEIPT,
+            quantity=Quantity(3, uom(stocked, "PACK")),
+        )
+
+        # Quarantined stock is not sellable, so it must not be counted.
+        held_batch = make_batch(org, held, number="PAR-3")
+        services.post_movement(
+            organization=org, location=location, batch=held_batch,
+            kind=MovementKind.PURCHASE_RECEIPT,
+            quantity=Quantity(5, uom(held, "PACK")),
+            status=StockStatus.QUARANTINED,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return {"client": client, "stocked": stocked, "empty": empty, "held": held}
+
+    def rows(self, counter):
+        response = counter["client"].get("/api/v1/products/?search=paracetamol")
+        assert response.status_code == 200
+        return {row["name"]: row for row in response.data["results"]}
+
+    def test_a_stocked_product_says_how_much(self, counter):
+        rows = self.rows(counter)
+        assert rows["Paracetamol 500mg tablets"]["on_hand_base"] == 300
+
+    def test_a_product_with_none_says_zero(self, counter):
+        """Not absent from the list — a cashier still needs to find it."""
+        rows = self.rows(counter)
+        assert rows["Paracetamol 120mg/5ml syrup"]["on_hand_base"] == 0
+
+    def test_quarantined_stock_does_not_count(self, counter):
+        """It is on the premises and it is not sellable."""
+        rows = self.rows(counter)
+        assert rows["Paracetamol 250mg suppository"]["on_hand_base"] == 0
+
+    def test_the_figure_names_its_unit(self, counter):
+        """"300" is not an answer. Three hundred of what?"""
+        rows = self.rows(counter)
+        assert rows["Paracetamol 500mg tablets"]["base_uom_name"]
+
+    def test_a_location_scopes_the_figure(self, counter):
+        """The till sells from one room, so it asks about that room.
+
+        A front counter told there are twenty-four bottles when all
+        twenty-four are in the cold room is back where it started.
+        """
+        from inventory.tests.factories import make_location
+
+        elsewhere = make_location(counter["stocked"].organization, "Cold room", "COLD")
+        response = counter["client"].get(
+            f"/api/v1/products/?search=paracetamol&location={elsewhere.id}"
+        )
+        rows = {row["name"]: row for row in response.data["results"]}
+        assert rows["Paracetamol 500mg tablets"]["on_hand_base"] == 0
+
+    def test_without_a_location_it_is_the_whole_pharmacy(self, counter):
+        rows = self.rows(counter)
+        assert rows["Paracetamol 500mg tablets"]["on_hand_base"] == 300
+
+    def test_the_list_does_not_cost_a_query_per_row(self, counter, django_assert_max_num_queries):
+        """The till searches on every keystroke."""
+        with django_assert_max_num_queries(10):
+            counter["client"].get("/api/v1/products/?search=paracetamol")

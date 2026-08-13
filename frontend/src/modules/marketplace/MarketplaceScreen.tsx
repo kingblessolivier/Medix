@@ -485,6 +485,22 @@ function CompareModal({
     count <= availableInUnit;
   const lineTotal = chosen ? chosen.price * (valid ? count : 0) : 0;
 
+  /* A disabled button with no explanation is a dead end: the buyer can
+     see they cannot order and not why, and the reasons are different
+     conversations. A depot whose minimum exceeds what it has left is a
+     real state — the buyer needs to ring them, not keep clicking. */
+  const refusal = !row.is_orderable
+    ? ""
+    : soldOut(row)
+      ? "The depot has none of this left."
+      : !locationId
+        ? "Set a delivery location in Settings first."
+        : count > availableInUnit
+          ? `Only ${availableInUnit.toLocaleString()} ${chosen?.code.toLowerCase() ?? ""} left.`
+          : row.moq > availableInUnit
+            ? `Minimum is ${row.moq.toLocaleString()}, and ${availableInUnit.toLocaleString()} are left.`
+            : "";
+
   // Volume thresholds are quoted in the depot's own unit, so the buyer's
   // quantity converts down before comparing — two cartons must qualify
   // for a "24 packs" break, and comparing carton count against a pack
@@ -592,6 +608,12 @@ function CompareModal({
           </div>
         </div>
       </div>
+
+      {refusal && (
+        <Banner tone="warn" className="mb-4">
+          {refusal}
+        </Banner>
+      )}
 
       {added && (
         <Banner tone="ok" className="mb-4">

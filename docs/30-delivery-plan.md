@@ -742,3 +742,25 @@ suite was green through, listed under *What was learned along the way*.
 The most serious was that a purchase order could not leave draft at all:
 the approval services existed, tested and correct, with no route to
 them.
+
+**The till could not see the shelf.** The product list the point of sale
+searches carried name, prescription status and nothing about stock. A
+cashier typing "paracetamol" got two products that looked identical,
+tapped one, and read *Paracetamol 120mg/5ml syrup: 0 available, 1
+requested* in a red banner — with a patient at the counter, now guessing
+which of two results they can sell. The figure existed; it was simply not
+on the row.
+
+**And a stock figure without a location is the same wrong answer in a
+politer voice.** The first cut annotated the organization's total, which
+would have told a front counter there were twenty-four bottles when all
+twenty-four were in the cold room. `?location=` scopes it, and the till
+passes the one it is selling from. Verified by standing at both: the cold
+room shows every paracetamol as *None on the shelf* and disables the row;
+the front counter shows 24 and 4,200 and sells from them.
+
+**A disabled button that does not say why is a dead end.** Two of sixty
+listings had a depot minimum higher than what the depot had left — a real
+state, and one the buyer has to ring the depot about rather than keep
+clicking. The order detail now states it: *Minimum is 20, and 8 are
+left.*
