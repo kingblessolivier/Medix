@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.quantity import Quantity
-from finance import reports, services
+from finance import intelligence, reports, services
 from finance.models import Expense, ExpenseCategory, WriteOff
 from finance.serializers import (
     ExpenseCategorySerializer,
@@ -176,6 +176,32 @@ class DashboardView(APIView):
                 start=data["start"],
                 end=data["end"],
                 tier=data["tier"],
+            )
+        )
+
+
+class IntelligenceView(APIView):
+    """What makes money, and what is quietly costing it.
+
+    Defaults to the last 90 days: margin by category needs enough
+    transactions to mean anything, and a month of a new deployment does
+    not have them.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from datetime import date
+
+        def parse(name):
+            raw = request.query_params.get(name)
+            return date.fromisoformat(raw) if raw else None
+
+        return Response(
+            intelligence.report(
+                organization=request.user.organization,
+                start=parse("start"),
+                end=parse("end"),
             )
         )
 

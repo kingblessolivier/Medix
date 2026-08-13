@@ -474,6 +474,65 @@ export type BatchTrace = {
   on_hand_base: number;
 };
 
+/** Licences and registrations, read live rather than from a status column. */
+export type ComplianceState = {
+  as_of: string;
+  licences: {
+    id: string;
+    kind: string;
+    kind_label: string;
+    number: string;
+    expiry: string;
+    days_remaining: number;
+    status: string;
+    is_valid: boolean;
+  }[];
+  registrations: {
+    id: string;
+    name: string;
+    council_number: string;
+    expiry: string;
+    days_remaining: number;
+    status: string;
+    is_valid: boolean;
+  }[];
+  alerts: Alert[];
+};
+
+export type MarginRow = {
+  key: string;
+  label: string;
+  revenue: number;
+  cogs: number;
+  gross_profit: number;
+  /** Null when there was no revenue — not the same as a zero margin. */
+  margin_bp: number | null;
+};
+
+export type IntelligenceReport = {
+  start: string;
+  end: string;
+  by_category: MarginRow[];
+  by_product: MarginRow[];
+  best_sellers: {
+    product: string;
+    name: string;
+    units: number;
+    revenue: number;
+    sales: number;
+  }[];
+  slow_movers: {
+    product: string;
+    name: string;
+    on_hand: number;
+    sold: number;
+    value: number;
+    /** Null means it did not sell at all in the period. */
+    cover_days: number | null;
+  }[];
+  stock_outs: { product: string; name: string; sold: number; on_hand: number }[];
+};
+
 /* -- documents --------------------------------------------------------- */
 
 /* Named MedixDocument because `Document` is the DOM global, and shadowing
@@ -762,6 +821,7 @@ export const api = {
   product: (id: string) => request<ProductDetail>(`/products/${id}/`),
   locations: () => request<Paginated<Location>>("/locations/"),
 
+  sales: () => request<Paginated<Sale>>("/sales/"),
   sale: (id: string) => request<Sale>(`/sales/${id}/`),
   startSale: (location: string) =>
     request<Sale>("/sales/", { method: "POST", body: { location } }),
@@ -901,6 +961,17 @@ export const api = {
   /* -- pharmacies ------------------------------------------------------ */
 
   pharmacies: () => request<Pharmacy[]>("/pharmacies/"),
+
+  compliance: () => request<ComplianceState>("/compliance/"),
+  intelligence: (params: { start?: string; end?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    const suffix = query.toString();
+    return request<IntelligenceReport>(
+      `/finance/intelligence/${suffix ? `?${suffix}` : ""}`,
+    );
+  },
   registerPharmacy: (body: Record<string, unknown>) =>
     request<RegisteredPharmacy>("/pharmacies/register/", { method: "POST", body }),
 

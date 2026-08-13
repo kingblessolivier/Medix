@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 
 from catalog import checks as catalog_checks
 from commerce import checks as commerce_checks
+from core import checks as core_checks
 from core.alerts import seed_alert_rules, summarise
 from core.models import AlertRule, ControlledQuota
 from inventory import checks as inventory_checks
@@ -27,6 +28,10 @@ SCOPES = {
         *inventory_checks.below_reorder_point(organization=org),
     ],
     "receivables": lambda org: commerce_checks.receivables_overdue(supplier=org),
+    "compliance": lambda org: [
+        *core_checks.licences(organization=org),
+        *core_checks.registrations(organization=org),
+    ],
 }
 
 
@@ -43,6 +48,22 @@ class AlertView(APIView):
         if check is None:
             return Response(summarise([]))
         return Response(summarise(check(organization)))
+
+
+class ComplianceView(APIView):
+    """Licences, registrations, and what is about to lapse.
+
+    Read from live records rather than a status column somebody has to
+    remember to update — a compliance dashboard that can be stale is
+    worse than none, because it is believed.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(
+            core_checks.compliance_state(organization=request.user.organization)
+        )
 
 
 class RegulatorExtractView(APIView):

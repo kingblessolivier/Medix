@@ -15,6 +15,7 @@ import {
   ClipboardList,
   FileText,
   LayoutDashboard,
+  Lightbulb,
   Moon,
   Package,
   PackageCheck,
@@ -24,8 +25,11 @@ import {
   Settings,
   ShoppingCart,
   Store,
+  ShieldCheck,
   Sun,
+  TriangleAlert,
   Truck,
+  Undo2,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
@@ -46,6 +50,7 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
     operations.push({ id: "pos", label: "Point of sale", icon: Receipt });
   }
   operations.push({ id: "transfers", label: "Transfers", icon: ArrowLeftRight });
+  operations.push({ id: "returns", label: "Returns", icon: Undo2 });
   // A depot's fulfilment queue. Gated on publishing rather than on
   // DISTRIBUTE: if you can offer stock you have orders to pick.
   if (can("PUBLISH_LISTINGS")) {
@@ -79,6 +84,16 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
     });
   }
 
+  // Recall and compliance are one job done by one person, and both
+  // answer "what is about to go wrong" rather than "what happened".
+  groups.push({
+    label: "Compliance",
+    items: [
+      { id: "compliance", label: "Licences", icon: ShieldCheck },
+      { id: "recall", label: "Recall", icon: TriangleAlert },
+    ],
+  });
+
   groups.push({
     label: "Configuration",
     items: [{ id: "settings", label: "Settings", icon: Settings }],
@@ -88,6 +103,7 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
     label: "Reporting",
     items: [
       { id: "analytics", label: "Performance", icon: ChartNoAxesCombined },
+      { id: "intelligence", label: "Intelligence", icon: Lightbulb },
       { id: "finance", label: "Finance", icon: Wallet },
       { id: "documents", label: "Documents", icon: FileText },
     ],

@@ -7,7 +7,9 @@ import { AppShell, navigationFor } from "@/components/navigation/AppShell";
 import { EmptyState } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { api, logout, tokens } from "@/lib/api";
+import { IntelligenceScreen } from "@/modules/analytics/IntelligenceScreen";
 import { PerformanceScreen } from "@/modules/analytics/PerformanceScreen";
+import { ComplianceScreen } from "@/modules/compliance/ComplianceScreen";
 import { DistributionScreen } from "@/modules/distribution/DistributionScreen";
 import { LoginScreen } from "@/modules/auth/LoginScreen";
 import { DocumentsScreen } from "@/modules/documents/DocumentsScreen";
@@ -15,6 +17,8 @@ import { FinanceScreen } from "@/modules/finance/FinanceScreen";
 import { InventoryScreen } from "@/modules/inventory/InventoryScreen";
 import { OverviewScreen } from "@/modules/overview/OverviewScreen";
 import { PharmaciesScreen } from "@/modules/pharmacies/PharmaciesScreen";
+import { RecallScreen } from "@/modules/recall/RecallScreen";
+import { ReturnsScreen } from "@/modules/returns/ReturnsScreen";
 import { PrescriptionsScreen } from "@/modules/prescriptions/PrescriptionsScreen";
 import { SettingsScreen } from "@/modules/settings/SettingsScreen";
 import { TransfersScreen } from "@/modules/transfers/TransfersScreen";
@@ -139,6 +143,14 @@ export default function App() {
           <PharmaciesScreen />
         ) : active === "settings" ? (
           <SettingsScreen />
+        ) : active === "recall" ? (
+          <RecallScreen />
+        ) : active === "returns" ? (
+          <ReturnsScreen />
+        ) : active === "compliance" ? (
+          <ComplianceScreen />
+        ) : active === "intelligence" ? (
+          <IntelligenceScreen />
         ) : (
           <EmptyState
             heading="Not built yet"

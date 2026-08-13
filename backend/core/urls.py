@@ -25,6 +25,7 @@ urlpatterns = [
         alerts_views.ProductAlertView.as_view(),
         name="product-alerts",
     ),
+    path("compliance/", alerts_views.ComplianceView.as_view(), name="compliance"),
     path(
         "compliance/extract/",
         alerts_views.RegulatorExtractView.as_view(),

@@ -98,6 +98,17 @@ DEFAULTS: dict[str, dict] = {
     "ALLOCATION_EXHAUSTED": {"severity": Severity.WARNING, "threshold": {}},
     "REGISTRATION_EXPIRED": {"severity": Severity.CRITICAL, "threshold": {}},
     "REGISTRATION_EXPIRING": {"severity": Severity.WARNING, "threshold": {"days": 60}},
+    "LICENCE_EXPIRING": {"severity": Severity.WARNING, "threshold": {"days": 60}},
+    "LICENCE_EXPIRED": {"severity": Severity.CRITICAL, "threshold": {}},
+    "LICENCE_INVALID": {"severity": Severity.CRITICAL, "threshold": {}},
+    "PHARMACIST_REGISTRATION_EXPIRING": {
+        "severity": Severity.WARNING,
+        "threshold": {"days": 60},
+    },
+    "PHARMACIST_REGISTRATION_EXPIRED": {
+        "severity": Severity.CRITICAL,
+        "threshold": {},
+    },
     "BUYER_LICENCE_EXPIRED": {"severity": Severity.CRITICAL, "threshold": {}},
     "CREDIT_LIMIT_EXCEEDED": {"severity": Severity.CRITICAL, "threshold": {}},
     "CREDIT_LIMIT_NEAR": {"severity": Severity.WARNING, "threshold": {"percent": 80}},
