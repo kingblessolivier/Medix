@@ -36,7 +36,7 @@ Stack: Django 5 + DRF + PostgreSQL backend, React 19 + TypeScript + Vite + Tailw
 
 **Tables are first-class.** Use the shared `DataTable`. It provides sort, filter, column visibility, density, row selection, bulk actions and pagination. Do not hand-roll a `<table>` for a data list.
 
-**Drawers for inspection, pages for workflows.** Click a row → drawer. Full pages only for purchase order creation, import request, receiving, POS, prescription processing, insurance claim, product creation.
+**Centred modals for inspection, pages for workflows.** Click a row → modal. Full pages only for purchase order creation, import request, receiving, POS, prescription processing, insurance claim, product creation.
 
 **Type scale is 20/13.** Page title 20/600, section 14/600, body and table 13/400, table header 12/600, label 12/500, helper 11/400. Do not introduce other sizes.
 

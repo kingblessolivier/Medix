@@ -1,0 +1,313 @@
+/* Medix design tokens — the single source of colour, type, spacing, radius.
+ *
+ * Never write a literal colour, size, spacing or radius in a component.
+ * See docs/04-design-system.md, docs/26-typography.md, docs/27-layout.md.
+ *
+ * Dark is a purpose-built neutral ramp, not an inversion. The brand lifts
+ * because #0078D4 fails against a dark ground.
+ */
+
+:root {
+  /* -- surfaces: five levels, never eight ------------------------------ */
+  --app: #f4f6f8;
+  --nav: #f0f3f6;
+  --topbar: #f7f8fa;
+  --content: #f8fafc;
+  --surface: #ffffff;
+  --hover: #eef2f6;
+  --selected: #e8f5e9;
+
+  /* -- borders: two weights for structure, one for controls ------------ */
+  --border: #dce2e8;
+  --border-hair: #e4e8ec;
+  /* Dividers may be faint — they are decoration. The edge of an input is
+   * not: it is the only thing telling you where the field is, so it owes
+   * 3:1 under WCAG 1.4.11. */
+  --border-control: #848d95;
+
+  /* -- text ------------------------------------------------------------ */
+  --text: #17212b;
+  --text-2: #5f6b76;
+  /* Non-essential metadata only. Held to 3:1, never used for information
+   * the reader actually needs. */
+  --text-3: #868f98;
+
+  /* -- brand and semantic ---------------------------------------------- */
+
+  /* Brand: the Material green ramp — 800 for fills, 900 for words, 50 for
+   * tints. Green because a pharmacy cross in Rwanda is green; blue reads
+   * as banking here. The ramp sits ΔE 21 from --ok, so a brand fill and a
+   * success dot never read as the same thing.
+   *
+   * --on-brand is the text that sits *on* a brand fill, and it is not
+   * always white: in dark the brand is a pale green where white gives
+   * 1.6:1. Never hardcode text-white on a brand surface. */
+  --brand: #2e7d32;
+  --brand-weak: #e8f5e9;
+  --brand-text: #1b5e20;
+  --on-brand: #ffffff;
+
+  /* Informational, not a success: "confirmed", "in progress". Deliberately
+   * blue so a status column never shows two greens meaning two things. */
+  --info: #0f5a9c;
+  --info-bg: #e8f1ff;
+  --info-text: #0f5a9c;
+
+  /* Two ramps per status, and they are not interchangeable.
+   * `--ok` is the *mark*: an 8px dot, an icon, a rule. 3:1 is its bar.
+   * `--ok-text` is the *word*: it owes 4.5:1, on white and on its own
+   * tint. Painting a sentence in the mark colour is the mistake this
+   * split exists to prevent — #059669 on #e7f5ef is 3.36:1. */
+  --ok: #059669;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --ok-bg: #e7f5ef;
+  --warn-bg: #fbf0e0;
+  --bad-bg: #fbeaea;
+  --ok-text: #047857;
+  --warn-text: #92400e;
+  --bad-text: #b91c1c;
+
+  /* -- chart: validated palette, light --------------------------------- */
+  --chart-1: #0078d4;
+  --chart-2: #b5179e;
+  --chart-3: #8a5a00;
+  /* Teal, darkened: at #009b9b it collapsed into chart-1 under
+   * tritanopia (ΔE 7.1). Lightness now carries the separation. */
+  --chart-4: #00706e;
+
+  /* -- elevation ------------------------------------------------------- */
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --elev-2: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --elev-3: 0 12px 32px rgba(15, 23, 42, 0.14);
+  --scrim: rgba(15, 23, 42, 0.32);
+
+  /* -- radius ---------------------------------------------------------- */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 12px;
+
+  /* -- type ------------------------------------------------------------ */
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui,
+    -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas,
+    monospace;
+
+  /* -- layout ---------------------------------------------------------- */
+  --sidebar-w: 248px;
+  --sidebar-collapsed-w: 68px;
+  --topbar-h: 56px;
+  --content-max: 1440px;
+
+  /* -- motion ---------------------------------------------------------- */
+  --dur-fast: 100ms;
+  --dur-pop: 120ms;
+  --dur-modal: 160ms;
+  --dur-drawer: 200ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-drawer: cubic-bezier(0.2, 0, 0, 1);
+
+  /* -- z-index --------------------------------------------------------- */
+  --z-sticky: 10;
+  --z-nav: 20;
+  --z-dropdown: 30;
+  --z-drawer: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-palette: 70;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app: #14181b;
+    --nav: #101418;
+    --topbar: #171b1f;
+    --content: #1a1f24;
+    --surface: #1e242a;
+    --hover: #252c33;
+    --selected: #16301f;
+
+    --border: #2b333a;
+    --border-hair: #242b31;
+    --border-control: #66727c;
+
+    --text: #e6ebef;
+    --text-2: #96a2ac;
+    --text-3: #6e7a84;
+
+    --brand: #a5d6a7;
+    --brand-weak: #16301f;
+    --brand-text: #a5d6a7;
+    --on-brand: #10241a;
+    --info: #8cc6f0;
+    --info-bg: #12314c;
+    --info-text: #8cc6f0;
+    --ok: #34c88a;
+    --warn: #dfa23a;
+    --bad: #ea6e66;
+    --ok-bg: #12291f;
+    --warn-bg: #2a2013;
+    --bad-bg: #2c1817;
+    /* On a dark ground the mark colours already clear 4.5:1 on their own
+     * tints, so word and mark coincide here. In light they cannot. */
+    --ok-text: #34c88a;
+    --warn-text: #dfa23a;
+    --bad-text: #ea6e66;
+
+    --chart-1: #3b96e3;
+    --chart-2: #d253b4;
+    --chart-3: #b5892c;
+    --chart-4: #5eead4;
+
+    --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --elev-2: 0 4px 12px rgba(0, 0, 0, 0.5);
+    --elev-3: 0 12px 32px rgba(0, 0, 0, 0.6);
+    --scrim: rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* The viewer's explicit choice must win over the media query in both
+ * directions, so each theme is restated under a data attribute. */
+
+:root[data-theme="dark"] {
+  --app: #14181b;
+  --nav: #101418;
+  --topbar: #171b1f;
+  --content: #1a1f24;
+  --surface: #1e242a;
+  --hover: #252c33;
+  --selected: #16301f;
+  --border: #2b333a;
+  --border-hair: #242b31;
+  --border-control: #66727c;
+  --text: #e6ebef;
+  --text-2: #96a2ac;
+  --text-3: #6e7a84;
+  --brand: #a5d6a7;
+  --brand-weak: #16301f;
+  --brand-text: #a5d6a7;
+  --on-brand: #10241a;
+  --info: #8cc6f0;
+  --info-bg: #12314c;
+  --info-text: #8cc6f0;
+  --ok: #34c88a;
+  --warn: #dfa23a;
+  --bad: #ea6e66;
+  --ok-bg: #12291f;
+  --warn-bg: #2a2013;
+  --bad-bg: #2c1817;
+  --ok-text: #34c88a;
+  --warn-text: #dfa23a;
+  --bad-text: #ea6e66;
+  --chart-1: #3b96e3;
+  --chart-2: #d253b4;
+  --chart-3: #b5892c;
+  --chart-4: #5eead4;
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --scrim: rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme="light"] {
+  --app: #f4f6f8;
+  --nav: #f0f3f6;
+  --topbar: #f7f8fa;
+  --content: #f8fafc;
+  --surface: #ffffff;
+  --hover: #eef2f6;
+  --selected: #e8f5e9;
+  --border: #dce2e8;
+  --border-hair: #e4e8ec;
+  --border-control: #848d95;
+  --text: #17212b;
+  --text-2: #5f6b76;
+  --text-3: #868f98;
+  /* Brand: the Material green ramp — 800 for fills, 900 for words, 50 for
+   * tints. Green because a pharmacy cross in Rwanda is green; blue reads
+   * as banking here. The ramp is deliberately far from --ok (ΔE 21) so a
+   * brand fill and a success dot never read as the same thing.
+   *
+   * --on-brand is the text that sits *on* a brand fill. It is not always
+   * white: in dark the brand is a pale green and white would give 1.6:1.
+   */
+  --brand: #2e7d32;
+  --brand-weak: #e8f5e9;
+  --brand-text: #1b5e20;
+  --on-brand: #ffffff;
+
+  /* Informational, not a success: "confirmed", "in progress". Kept blue
+   * so a status column never shows two greens meaning different things. */
+  --info: #0f5a9c;
+  --info-bg: #e8f1ff;
+  --info-text: #0f5a9c;
+
+  --ok: #059669;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --ok-bg: #e7f5ef;
+  --warn-bg: #fbf0e0;
+  --bad-bg: #fbeaea;
+  --ok-text: #047857;
+  --warn-text: #92400e;
+  --bad-text: #b91c1c;
+  --chart-1: #0078d4;
+  --chart-2: #b5179e;
+  --chart-3: #8a5a00;
+  --chart-4: #00706e;
+  --elev-1: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --elev-2: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --elev-3: 0 12px 32px rgba(15, 23, 42, 0.14);
+  --scrim: rgba(15, 23, 42, 0.32);
+}
+
+/* -- base ------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--app);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv05" 1, "ss03" 1;
+}
+
+/* Digits that line up in columns must be tabular, with a slashed zero
+ * wherever a code or batch number is read aloud or typed from a screen. */
+table,
+th,
+td,
+.tabular,
+input[type="number"] {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,698 @@
+/* Marketplace browse.
+ *
+ * List is the professional default — a pharmacist doing procurement
+ * compares faster in rows. Grid is a toggle, for when visual
+ * identification actually matters.
+ *
+ * Cards stay small. The failure mode is a huge image, a description
+ * paragraph and a full-width button: that card fits four products where a
+ * proper one fits twelve, and a buyer is comparing, not shopping.
+ *
+ * See docs/19-screens.md §2 and docs/05-modules.md §2.
+ */
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Boxes,
+  LayoutGrid,
+  List,
+  Pill,
+  Plane,
+  Plus,
+  Snowflake,
+  Stethoscope,
+} from "lucide-react";
+import { useEffect, useState } from "react";
+
+import { ApiFailure, api, type MarketplaceRow } from "@/lib/api";
+import { ProductImage } from "@/components/data/ProductImage";
+import {
+  DataTable,
+  DataToolbar,
+  TableTabs,
+  type Column,
+  type Density,
+  type TableTab,
+} from "@/components/data/DataTable";
+import {
+  Badge,
+  Banner,
+  Button,
+  ErrorState,
+  Field,
+  Input,
+  Select,
+  PageHeader,
+  StatusDot,
+  StatusPill,
+  type Tone,
+} from "@/components/ui";
+import { DetailList, Modal } from "@/components/ui/Modal";
+import { Help } from "@/components/ui/Guidance";
+
+const CURRENCY = new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 });
+
+/* A listing can say "Available" and have nothing behind it: the depot
+   published the product but allocated no stock to it, or the allocation
+   has been consumed by other pharmacies. Ordering then fails at the
+   server with "0 box available", after the buyer has chosen a quantity
+   and pressed the button — so the truth is told on the row instead. */
+const soldOut = (row: MarketplaceRow) =>
+  row.availability === "AVAILABLE_NOW" && row.available_base <= 0;
+
+const AVAILABILITY: Record<string, { tone: Tone; label: string }> = {
+  AVAILABLE_NOW: { tone: "ok", label: "Available" },
+  INCOMING: { tone: "warn", label: "Incoming" },
+  PRE_ORDER: { tone: "warn", label: "Pre-order" },
+  IMPORT_ON_DEMAND: { tone: "neutral", label: "Import only" },
+  NOT_IN_COUNTRY: { tone: "neutral", label: "Not in Rwanda" },
+};
+
+/* What a buyer narrows by first. A pharmacist restocking does not browse
+   an alphabetical list of everything the country sells — they ask for the
+   antibiotics, or the consumables. */
+const KINDS: { id: string; label: string; icon: typeof Pill; match?: string }[] = [
+  { id: "all", label: "All", icon: List },
+  { id: "MEDICINE", label: "Medicines", icon: Pill, match: "MEDICINE" },
+  { id: "CONSUMABLE", label: "Consumables", icon: Boxes, match: "CONSUMABLE" },
+  { id: "DEVICE", label: "Devices", icon: Stethoscope, match: "DEVICE" },
+  { id: "SUPPLEMENT", label: "Supplements", icon: Pill, match: "SUPPLEMENT" },
+  { id: "COSMETIC", label: "Personal care", icon: Boxes, match: "COSMETIC" },
+];
+
+export function MarketplaceScreen({ locationId }: { locationId: string | null }) {
+  const [view, setView] = useState<"list" | "grid">("list");
+  const [density, setDensity] = useState<Density>("compact");
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState("all");
+  const [category, setCategory] = useState<string | null>(null);
+  const [compare, setCompare] = useState<MarketplaceRow | null>(null);
+
+  const listings = useQuery({
+    queryKey: ["marketplace", search],
+    queryFn: () =>
+      api.marketplace(`?exclude_own=true${search ? `&search=${encodeURIComponent(search)}` : ""}`),
+  });
+
+  // Counts describe the whole catalogue, not the page in hand — a tab
+  // reading "Medicines 28" when the depot lists 34 is a number someone
+  // makes a purchasing decision on.
+  const facets = useQuery({
+    queryKey: ["marketplace-facets", search],
+    queryFn: () =>
+      api.marketplaceFacets(
+        `?exclude_own=true${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+      ),
+  });
+
+  const all = listings.data?.results ?? [];
+  const byType = new Map(facets.data?.types.map((t) => [t.code, t.count]) ?? []);
+
+  const tabs: TableTab[] = KINDS.map((k) => ({
+    id: k.id,
+    label: k.label,
+    icon: k.icon,
+    count: k.match ? (byType.get(k.match) ?? 0) : (facets.data?.total ?? all.length),
+  }));
+
+  const byKind = all.filter(
+    (r) => kind === "all" || r.product_type_code === kind,
+  );
+
+  // Therapeutic categories present in the current kind, so the chips
+  // never offer a filter that would empty the table.
+  const categories = (
+    kind === "all"
+      ? (facets.data?.categories.map((c) => c.name) ?? [])
+      : [...new Set(byKind.map((r) => r.category_name).filter(Boolean))].sort()
+  ) as string[];
+
+  const rows = byKind.filter((r) => !category || r.category_name === category);
+
+  const columns: Column<MarketplaceRow>[] = [
+    {
+      key: "product",
+      header: "Product",
+      sortable: true,
+      render: (r) => (
+        <span className="flex items-center gap-2">
+          <ProductImage src={r.image} alt={r.image_alt} coldChain={r.cold_chain} />
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5 truncate">
+              {r.product_name}
+              {r.cold_chain && (
+                <Snowflake
+                  size={13}
+                  strokeWidth={1.8}
+                  className="shrink-0 text-brand"
+                  aria-label="Cold chain"
+                />
+              )}
+            </span>
+            {/* The pack is half the identity. "Amoxicillin 500mg" is not
+                orderable information until you know it is a box of 30. */}
+            <span className="block truncate text-help text-text-3">{r.pack_size}</span>
+          </span>
+        </span>
+      ),
+      sortValue: (r) => r.product_name,
+    },
+    {
+      key: "category",
+      header: "Category",
+      render: (r) => <span className="text-text-2">{r.category_name ?? "—"}</span>,
+      sortable: true,
+      sortValue: (r) => r.category_name ?? "",
+    },
+    { key: "form", header: "Form", render: (r) => <span className="text-text-2">{r.dosage_form}</span> },
+    { key: "vendor", header: "Supplier", render: (r) => r.vendor_name },
+    {
+      key: "stock",
+      header: "Available",
+      numeric: true,
+      sortable: true,
+      render: (r) => (r.is_orderable ? r.available_base.toLocaleString() : "—"),
+      sortValue: (r) => r.available_base,
+    },
+    {
+      key: "price",
+      header: "Price",
+      numeric: true,
+      sortable: true,
+      render: (r) => (r.is_orderable ? CURRENCY.format(r.price) : "—"),
+      sortValue: (r) => r.price,
+    },
+    { key: "moq", header: "MOQ", numeric: true, render: (r) => r.moq.toLocaleString() },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => {
+        if (soldOut(r)) return <StatusPill tone="neutral">None left</StatusPill>;
+        const state = AVAILABILITY[r.availability] ?? AVAILABILITY.NOT_IN_COUNTRY;
+        return <StatusPill tone={state.tone}>{state.label}</StatusPill>;
+      },
+    },
+  ];
+
+  if (listings.isError) {
+    return (
+      <>
+        <PageHeader title="Marketplace" description="Products from wholesale pharmacies" />
+        <ErrorState message="Couldn't load listings." onRetry={() => listings.refetch()} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Marketplace"
+        description="Products from wholesale pharmacies"
+        actions={
+          <span className="text-body text-text-2">
+            {(facets.data?.total ?? rows.length).toLocaleString()} listings
+          </span>
+        }
+      />
+
+      <TableTabs
+        tabs={tabs}
+        active={kind}
+        onChange={(k) => {
+          setKind(k);
+          setCategory(null);
+        }}
+      />
+
+      <DataToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Filter products"
+        density={view === "list" ? density : undefined}
+        onDensity={view === "list" ? setDensity : undefined}
+        right={<ViewToggle view={view} onChange={setView} />}
+      />
+
+      {categories.length > 1 && (
+        <CategoryChips
+          categories={categories}
+          active={category}
+          onChange={setCategory}
+        />
+      )}
+
+      {view === "list" ? (
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.id}
+          density={density}
+          loading={listings.isLoading}
+          caption="Marketplace listings"
+          onRowClick={setCompare}
+          emptyHeading={search ? `No results for "${search}"` : "No listings"}
+        />
+      ) : (
+        <CardGrid rows={rows} onSelect={setCompare} />
+      )}
+
+      <CompareModal
+        row={compare}
+        locationId={locationId}
+        onClose={() => setCompare(null)}
+      />
+    </>
+  );
+}
+
+/* Therapeutic classification as chips rather than a select: a buyer
+   scans these, and a closed dropdown hides what is available. */
+function CategoryChips({
+  categories,
+  active,
+  onChange,
+}: {
+  categories: string[];
+  active: string | null;
+  onChange: (c: string | null) => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap gap-1.5">
+      {[null, ...categories].map((c) => {
+        const on = c === active;
+        return (
+          <button
+            key={c ?? "all"}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(c)}
+            className={
+              "rounded-full border px-2.5 py-1 text-help transition-colors " +
+              (on
+                ? "border-brand bg-brand-weak font-semibold text-brand-text"
+                : "border-border text-text-2 hover:bg-hover")
+            }
+          >
+            {c ?? "All categories"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: "list" | "grid";
+  onChange: (v: "list" | "grid") => void;
+}) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-sm border border-border">
+      {(
+        [
+          ["list", List, "List"],
+          ["grid", LayoutGrid, "Grid"],
+        ] as const
+      ).map(([value, Icon, label]) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onChange(value)}
+          aria-pressed={view === value}
+          className={
+            "flex items-center gap-1.5 px-2.5 py-1 text-help transition-colors " +
+            (view === value
+              ? "bg-selected font-semibold text-brand-text"
+              : "text-text-2 hover:bg-hover")
+          }
+        >
+          <Icon size={13} strokeWidth={1.8} />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* Small cards. Image strip, name, form and pack, price with stock, one
+   compact action. Nothing else — a description paragraph here would cost
+   two-thirds of the rows on screen. */
+function CardGrid({
+  rows,
+  onSelect,
+}: {
+  rows: MarketplaceRow[];
+  onSelect: (row: MarketplaceRow) => void;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-surface px-6 py-14 text-center">
+        <p className="text-section font-semibold">No listings</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3">
+      {rows.map((row) => {
+        const state = AVAILABILITY[row.availability] ?? AVAILABILITY.NOT_IN_COUNTRY;
+        return (
+          <button
+            key={row.id}
+            type="button"
+            onClick={() => onSelect(row)}
+            className="overflow-hidden rounded-md border border-border bg-surface text-left transition-colors hover:border-brand"
+          >
+            <ProductImage
+              src={row.image}
+              alt={row.image_alt}
+              size="card"
+              coldChain={row.cold_chain}
+            />
+
+            <div className="px-2.5 pb-2.5 pt-2">
+              <p className="truncate text-body font-semibold leading-tight">{row.product_name}</p>
+              {/* Form and strength identify the product; the supplier is
+                  secondary when you are still deciding what to buy. */}
+              <p className="truncate text-help text-text-2">{row.pack_size}</p>
+              <p className="truncate text-help text-text-3">
+                {[row.manufacturer_name || row.brand, row.vendor_name]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+
+              <div className="mt-2 flex items-baseline justify-between">
+                <span className="tabular text-body font-semibold">
+                  {row.is_orderable ? CURRENCY.format(row.price) : "—"}
+                </span>
+                <span className="text-help text-text-2">
+                  {soldOut(row)
+                    ? "None left"
+                    : row.is_orderable
+                      ? `${row.available_base.toLocaleString()} left`
+                      : state.label}
+                </span>
+              </div>
+
+              {row.requires_prescription && (
+                <p className="mt-1 text-help text-warn-text">Prescription only</p>
+              )}
+
+              <span className="mt-2 block w-full rounded-sm border border-border py-1 text-center text-help font-semibold">
+                {soldOut(row) ? "None left" : row.is_orderable ? "Compare" : "Request import"}
+              </span>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Vendor comparison: price against expiry, MOQ and lead time. The system
+   makes the tradeoff visible; it does not choose. */
+function CompareModal({
+  row,
+  locationId,
+  onClose,
+}: {
+  row: MarketplaceRow | null;
+  locationId: string | null;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [quantity, setQuantity] = useState("");
+  const [unitCode, setUnitCode] = useState("");
+  const [added, setAdded] = useState<{ number: string | null; lines: number } | null>(null);
+  const [failure, setFailure] = useState("");
+
+  // Each product opens on its own minimum and its own listed unit, and
+  // the last product's outcome must not linger on the next one.
+  useEffect(() => {
+    setQuantity(row ? String(row.moq) : "");
+    setUnitCode(row?.uom_code ?? "");
+    setAdded(null);
+    setFailure("");
+  }, [row?.id, row?.moq, row?.uom_code]);
+
+  const add = useMutation({
+    mutationFn: async () => {
+      const draft = await api.openDraft({
+        supplier: row!.vendor,
+        deliver_to: locationId!,
+      });
+      return api.addOrderLine(draft.id, {
+        listing: row!.id,
+        quantity: Number(quantity),
+        uom_code: unitCode,
+      });
+    },
+    onSuccess: (order) => {
+      // An order is numbered when it is submitted, not while it is built.
+      setAdded({ number: order.number || null, lines: order.lines.length });
+      setFailure("");
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+    },
+    // The supplier's rules — minimum, availability — are stated by the
+    // server. Show what it said rather than a generic failure.
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Couldn't add to order.",
+      ),
+  });
+
+  if (!row) return null;
+  const state = AVAILABILITY[row.availability] ?? AVAILABILITY.NOT_IN_COUNTRY;
+  const count = Number(quantity);
+  const chosen = row.units.find((u) => u.code === unitCode) ?? row.units[0];
+  // Both the running total and what the depot has left are quoted in the
+  // unit the buyer picked. Showing a carton count against a pack total is
+  // how an order for a twelfth of the intended amount looks correct.
+  const availableInUnit = chosen
+    ? Math.floor(row.available_base / chosen.factor_to_base)
+    : 0;
+  // Checked here as well as by the server: the server is the authority,
+  // but discovering the refusal after choosing a quantity and pressing
+  // the button is a worse way to learn it.
+  const valid =
+    Number.isInteger(count) &&
+    count > 0 &&
+    Boolean(locationId) &&
+    Boolean(chosen) &&
+    !soldOut(row) &&
+    count <= availableInUnit;
+  const lineTotal = chosen ? chosen.price * (valid ? count : 0) : 0;
+
+  /* A disabled button with no explanation is a dead end: the buyer can
+     see they cannot order and not why, and the reasons are different
+     conversations. A depot whose minimum exceeds what it has left is a
+     real state — the buyer needs to ring them, not keep clicking. */
+  const refusal = !row.is_orderable
+    ? ""
+    : soldOut(row)
+      ? "The depot has none of this left."
+      : !locationId
+        ? "Set a delivery location in Settings first."
+        : count > availableInUnit
+          ? `Only ${availableInUnit.toLocaleString()} ${chosen?.code.toLowerCase() ?? ""} left.`
+          : row.moq > availableInUnit
+            ? `Minimum is ${row.moq.toLocaleString()}, and ${availableInUnit.toLocaleString()} are left.`
+            : "";
+
+  // Volume thresholds are quoted in the depot's own unit, so the buyer's
+  // quantity converts down before comparing — two cartons must qualify
+  // for a "24 packs" break, and comparing carton count against a pack
+  // threshold would silently deny it.
+  const priceUomFactor =
+    row.units.find((u) => u.code === row.uom_code)?.factor_to_base ?? 1;
+  const inPriceUom = chosen
+    ? Math.floor(((valid ? count : 0) * chosen.factor_to_base) / priceUomFactor)
+    : 0;
+  const nextTier = row.tiers
+    .filter((tier) => tier.min_quantity > inPriceUom)
+    .sort((a, b) => a.min_quantity - b.min_quantity)[0];
+
+  return (
+    <Modal
+      open
+      title={row.product_name}
+      subtitle={row.generic_name || row.uom_name}
+      onClose={onClose}
+      footer={
+        row.is_orderable ? (
+          <div className="flex items-end gap-2">
+            <div className="w-20">
+              <Field label="Quantity">
+                {(id) => (
+                  <Input
+                    id={id}
+                    type="number"
+                    min={1}
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="tabular text-right"
+                  />
+                )}
+              </Field>
+            </div>
+            {/* Only levels the depot will actually break to. A selector
+                offering a unit the server refuses is a trap. */}
+            <div className="w-36">
+              <Field label="Unit">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={unitCode}
+                    onChange={(e) => setUnitCode(e.target.value)}
+                  >
+                    {row.units.map((u) => (
+                      <option key={u.code} value={u.code}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+            </div>
+            <Button
+              variant="primary"
+              className="flex-1"
+              icon={<Plus size={16} strokeWidth={2} aria-hidden />}
+              loading={add.isPending}
+              disabled={!valid}
+              onClick={() => add.mutate()}
+            >
+              Add to order
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="secondary"
+            className="w-full"
+            icon={<Plane size={16} strokeWidth={1.8} aria-hidden />}
+          >
+            Request import
+          </Button>
+        )
+      }
+    >
+      {/* Picture and identity together. The buyer checks the artwork
+          against the box they stock, then checks the numbers underneath
+          it — the picture alone has never been enough to order on. */}
+      <div className="mb-4 flex gap-4">
+        <ProductImage
+          src={row.image}
+          alt={row.image_alt}
+          size="detail"
+          coldChain={row.cold_chain}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-body text-text">{row.pack_size}</p>
+          <p className="text-help text-text-2">
+            {[row.manufacturer_name, row.dosage_form].filter(Boolean).join(" · ") || "—"}
+          </p>
+          {row.gtin && (
+            <p className="mt-1 font-mono text-help text-text-3">{row.gtin}</p>
+          )}
+          {row.registration_number && (
+            <p className="font-mono text-help text-text-3">
+              {row.registration_number}
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <StatusDot tone={state.tone}>{state.label}</StatusDot>
+            {row.requires_prescription && <Badge tone="warn">Prescription only</Badge>}
+            {row.cold_chain && <Badge tone="brand">Cold chain</Badge>}
+          </div>
+        </div>
+      </div>
+
+      {refusal && (
+        <Banner tone="warn" className="mb-4">
+          {refusal}
+        </Banner>
+      )}
+
+      {added && (
+        <Banner tone="ok" className="mb-4">
+          {added.number ? `On order ${added.number}` : "On draft order"} · {added.lines} line
+          {added.lines === 1 ? "" : "s"}
+        </Banner>
+      )}
+      {failure && (
+        <Banner tone="bad" className="mb-4">
+          {failure}
+        </Banner>
+      )}
+
+      <DetailList
+        rows={[
+          ["Category", row.category_name ?? "—"],
+          ["Form", row.dosage_form || "—"],
+          ["Brand", row.brand || "—"],
+          ["Manufacturer", row.manufacturer_name ?? "—"],
+          ["Supplier", row.vendor_name],
+          ["Minimum order", row.moq.toLocaleString()],
+          ["Lead time", `${row.lead_time_days} day${row.lead_time_days === 1 ? "" : "s"}`],
+          [
+            `Price per ${chosen?.code.toLowerCase() ?? "unit"}`,
+            chosen ? CURRENCY.format(chosen.price) : "—",
+          ],
+          [
+            /* The word does not mean what a pharmacist assumes. It is
+               what this depot published, less what other pharmacies have
+               already committed — not what is on its shelves. */
+            (
+              <Help term="Available">
+                What you can order now. Not the depot's stock: it excludes what
+                other pharmacies have already committed to.
+              </Help>
+            ) as unknown as string,
+            row.is_orderable
+              ? `${availableInUnit.toLocaleString()} ${chosen?.code.toLowerCase() ?? ""}`
+              : "—",
+          ],
+          ["Order value", CURRENCY.format(lineTotal)],
+          ...(row.srp !== null
+            ? ([
+                [
+                  `Suggested retail per ${row.uom_code.toLowerCase()}`,
+                  CURRENCY.format(row.srp),
+                ],
+              ] as [string, string][])
+            : []),
+        ]}
+      />
+
+      {/* Info, never a warning: it costs the buyer nothing to ignore, and
+          a soft stop on "you could spend more" would be the system
+          selling rather than informing. */}
+      {nextTier && (
+        <Banner tone="info" className="mt-4">
+          {`${nextTier.min_quantity - inPriceUom} more ${row.uom_code.toLowerCase()} at ${CURRENCY.format(nextTier.price)} each`}
+        </Banner>
+      )}
+
+      {row.tiers.length > 0 && (
+        <>
+          <h3 className="mb-2 mt-6 text-section font-semibold">Volume price</h3>
+          <DetailList
+            rows={[
+              [`1+ ${row.uom_code.toLowerCase()}`, CURRENCY.format(row.price)],
+              ...row.tiers.map(
+                (tier) =>
+                  [
+                    `${tier.min_quantity}+ ${row.uom_code.toLowerCase()}`,
+                    CURRENCY.format(tier.price),
+                  ] as [string, string],
+              ),
+            ]}
+          />
+        </>
+      )}
+    </Modal>
+  );
+}
+

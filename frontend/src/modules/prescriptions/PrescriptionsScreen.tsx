@@ -1,0 +1,634 @@
+/* Prescriptions, and the pharmacist who authorizes them.
+ *
+ * The rule this screen exists to hold: **OCR extracts, a registered
+ * pharmacist authorizes.** Anything read off an image is advisory and is
+ * shown as such; verification is a deliberate act by a named person
+ * whose council number is captured at that moment, so the record stays
+ * truthful even if their registration later lapses.
+ *
+ * There is no "verify all". A control you can apply to a page of
+ * prescriptions in one click is not a control.
+ */
+
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Plus } from "lucide-react";
+import {
+  DataTable,
+  TableTabs,
+  type Column,
+  type TableTab,
+} from "@/components/data/DataTable";
+import {
+  Banner,
+  Badge,
+  Button,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  StatusPill,
+  type Tone,
+} from "@/components/ui";
+import { DetailList, Modal } from "@/components/ui/Modal";
+import { ApiFailure, api, type Prescription } from "@/lib/api";
+
+const DAY = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+});
+
+const STATUS: Record<string, { tone: Tone; label: string }> = {
+  PENDING: { tone: "warn", label: "Pending" },
+  VERIFIED: { tone: "ok", label: "Verified" },
+  REJECTED: { tone: "bad", label: "Rejected" },
+  PARTIALLY_DISPENSED: { tone: "info", label: "Part dispensed" },
+  DISPENSED: { tone: "neutral", label: "Dispensed" },
+};
+
+const VIEWS: { id: string; label: string; match?: string[] }[] = [
+  { id: "pending", label: "To verify", match: ["PENDING"] },
+  { id: "verified", label: "Verified", match: ["VERIFIED", "PARTIALLY_DISPENSED"] },
+  { id: "closed", label: "Closed", match: ["DISPENSED", "REJECTED"] },
+  { id: "all", label: "All" },
+];
+
+export function PrescriptionsScreen() {
+  const [view, setView] = useState("pending");
+  const [selected, setSelected] = useState<Prescription | null>(null);
+  const [raising, setRaising] = useState(false);
+
+  const prescriptions = useQuery({
+    queryKey: ["prescriptions"],
+    queryFn: () => api.prescriptions(),
+  });
+
+  if (prescriptions.isPending) return <Skeleton className="h-[400px]" />;
+
+  const all = prescriptions.data?.results ?? [];
+  const chosen = VIEWS.find((v) => v.id === view);
+  const rows = chosen?.match ? all.filter((p) => chosen.match!.includes(p.status)) : all;
+
+  const tabs: TableTab[] = VIEWS.map((v) => ({
+    id: v.id,
+    label: v.label,
+    count: v.match ? all.filter((p) => v.match!.includes(p.status)).length : all.length,
+  }));
+
+  const columns: Column<Prescription>[] = [
+    { key: "number", header: "Number", mono: true, render: (p) => p.number || "—" },
+    { key: "patient", header: "Patient", render: (p) => p.patient?.full_name ?? "—" },
+    {
+      key: "issued",
+      header: "Issued",
+      render: (p) => (p.issued_on ? DAY.format(new Date(p.issued_on)) : "—"),
+    },
+    {
+      key: "verified",
+      header: "Verified by",
+      render: (p) => p.verified_by_council_number || "—",
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (p) => {
+        const status = STATUS[p.status] ?? STATUS.PENDING;
+        return <StatusPill tone={status.tone}>{status.label}</StatusPill>;
+      },
+    },
+  ];
+
+  return (
+    <>
+      <PageHeader
+        title="Prescriptions"
+        description="A pharmacist verifies. OCR never does."
+        actions={
+          <Button
+            variant="primary"
+            icon={<Plus size={16} strokeWidth={1.9} aria-hidden />}
+            onClick={() => setRaising(true)}
+          >
+            Raise prescription
+          </Button>
+        }
+      />
+
+      <TableTabs tabs={tabs} active={view} onChange={setView} />
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(p) => p.id}
+        density="compact"
+        onRowClick={setSelected}
+        caption="Prescriptions"
+        emptyHeading="No prescriptions"
+        emptyBody="Prescriptions raised at the counter appear here."
+      />
+
+      <PrescriptionModal
+        prescription={selected}
+        onClose={() => setSelected(null)}
+      />
+      <RaiseModal open={raising} onClose={() => setRaising(false)} />
+    </>
+  );
+}
+
+function PrescriptionModal({
+  prescription,
+  onClose,
+}: {
+  prescription: Prescription | null;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [failure, setFailure] = useState("");
+
+  const verify = useMutation({
+    mutationFn: () => api.verifyPrescription(prescription!.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prescriptions"] });
+      setFailure("");
+      onClose();
+    },
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Not verified.",
+      ),
+  });
+
+  if (!prescription) return null;
+  const status = STATUS[prescription.status] ?? STATUS.PENDING;
+
+  return (
+    <Modal
+      open
+      title={prescription.number || "Prescription"}
+      subtitle={prescription.patient?.full_name}
+      onClose={onClose}
+      footer={
+        prescription.status === "PENDING" ? (
+          <Button
+            variant="primary"
+            className="w-full"
+            icon={<Check size={16} strokeWidth={1.9} aria-hidden />}
+            loading={verify.isPending}
+            onClick={() => verify.mutate()}
+          >
+            Verify
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="mb-4">
+        <StatusPill tone={status.tone}>{status.label}</StatusPill>
+      </div>
+
+      {failure && (
+        <Banner tone="bad" className="mb-4">
+          {failure}
+        </Banner>
+      )}
+
+      {prescription.status === "PENDING" && (
+        /* Says whose act this is. The council number captured here is
+           what the record will carry for ever. */
+        <Banner tone="warn" className="mb-4">
+          Verifying attaches your council registration to this dispensing.
+        </Banner>
+      )}
+
+      <DetailList
+        rows={[
+          ["Patient", prescription.patient?.full_name ?? "—"],
+          ["Phone", prescription.patient?.phone || "—"],
+          [
+            "Issued",
+            prescription.issued_on
+              ? DAY.format(new Date(prescription.issued_on))
+              : "—",
+          ],
+          [
+            "Verified",
+            prescription.verified_at
+              ? DAY.format(new Date(prescription.verified_at))
+              : "—",
+          ],
+          ["Council number", prescription.verified_by_council_number || "—"],
+        ]}
+      />
+
+      {prescription.patient?.allergies?.length ? (
+        <>
+          <h3 className="mb-2 mt-6 text-section font-semibold">Recorded allergies</h3>
+          <ul className="flex flex-col gap-1">
+            {prescription.patient.allergies.map((allergy) => (
+              <li key={allergy.id} className="text-body text-text">
+                {allergy.allergen}
+                <span className="ml-2 text-help text-text-3">
+                  {allergy.severity_label}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </Modal>
+  );
+}
+
+function RaiseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [patient, setPatient] = useState("");
+  const [prescriber, setPrescriber] = useState("");
+  const [issuedOn, setIssuedOn] = useState("");
+  const [number, setNumber] = useState("");
+  const [failure, setFailure] = useState("");
+
+  const patients = useQuery({
+    queryKey: ["patients"],
+    queryFn: () => api.patients(),
+    enabled: open,
+  });
+  const prescribers = useQuery({
+    queryKey: ["prescribers"],
+    queryFn: () => api.prescribers(),
+    enabled: open,
+  });
+
+  /* A pharmacy on its first day has no patients and no prescribers, and
+     a select with nothing in it and no way to add anything is a dead
+     end — the screen could not be used at all. Inline rather than a
+     second modal: a modal never opens another modal. */
+  const [newPatient, setNewPatient] = useState(false);
+  const [patientName, setPatientName] = useState("");
+  const [patientPhone, setPatientPhone] = useState("");
+  const [newPrescriber, setNewPrescriber] = useState(false);
+  const [prescriberName, setPrescriberName] = useState("");
+  const [councilNumber, setCouncilNumber] = useState("");
+
+  const addPatient = useMutation({
+    mutationFn: () =>
+      api.savePatient({ full_name: patientName, phone: patientPhone }),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      setPatient(created.id);
+      setNewPatient(false);
+      setPatientName("");
+      setPatientPhone("");
+    },
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Patient not saved.",
+      ),
+  });
+
+  const addPrescriber = useMutation({
+    mutationFn: () =>
+      api.savePrescriber({
+        full_name: prescriberName,
+        council_number: councilNumber,
+      }),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["prescribers"] });
+      setPrescriber(created.id);
+      setNewPrescriber(false);
+      setPrescriberName("");
+      setCouncilNumber("");
+    },
+    onError: (error) =>
+      setFailure(
+        error instanceof ApiFailure ? error.error.message : "Prescriber not saved.",
+      ),
+  });
+
+  const raise = useMutation({
+    mutationFn: () =>
+      api.createPrescription({
+        patient,
+        prescriber: prescriber || null,
+        issued_on: issuedOn || null,
+        number,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["prescriptions"] });
+      setPatient("");
+      setNumber("");
+      setFailure("");
+      onClose();
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not raised."),
+  });
+
+  if (!open) return null;
+
+  return (
+    <Modal
+      open
+      title="Raise prescription"
+      onClose={onClose}
+      footer={
+        <Button
+          variant="primary"
+          className="w-full"
+          disabled={!patient}
+          loading={raise.isPending}
+          onClick={() => raise.mutate()}
+        >
+          Raise
+        </Button>
+      }
+    >
+      {failure && (
+        <Banner tone="bad" className="mb-4">
+          {failure}
+        </Banner>
+      )}
+
+      {/* It is raised pending and stays there. Only a pharmacist moves
+          it, and the button that does is on the other modal. */}
+      <Banner tone="info" className="mb-4">
+        Raised pending. A pharmacist verifies it before anything dispenses.
+      </Banner>
+
+      <div className="flex flex-col gap-4">
+        {newPatient ? (
+          <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <Field label="Patient name" required>
+              {(id) => (
+                <Input
+                  id={id}
+                  value={patientName}
+                  onChange={(e) => setPatientName(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Phone" help="How you would reach them on a recall.">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={patientPhone}
+                  onChange={(e) => setPatientPhone(e.target.value)}
+                />
+              )}
+            </Field>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setNewPatient(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                className="flex-1"
+                disabled={!patientName.trim()}
+                loading={addPatient.isPending}
+                onClick={() => addPatient.mutate()}
+              >
+                Add patient
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Field label="Patient" required>
+            {(id) => (
+              <div className="flex gap-2">
+                <Select
+                  id={id}
+                  value={patient}
+                  onChange={(e) => setPatient(e.target.value)}
+                  className="flex-1"
+                >
+                  <option value="">Choose a patient</option>
+                  {(patients.data?.results ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.full_name}
+                    </option>
+                  ))}
+                </Select>
+                <Button variant="secondary" onClick={() => setNewPatient(true)}>
+                  New
+                </Button>
+              </div>
+            )}
+          </Field>
+        )}
+
+        {/* The till checks every sale against this list. With nothing on
+            it the check matches nothing and passes every time, which
+            looks exactly like a clean result. */}
+        {!newPatient && patient && <Allergies patientId={patient} />}
+
+        {newPrescriber ? (
+          <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <Field label="Prescriber name" required>
+              {(id) => (
+                <Input
+                  id={id}
+                  value={prescriberName}
+                  onChange={(e) => setPrescriberName(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Council number" help="Goes on the dispensing record.">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={councilNumber}
+                  onChange={(e) => setCouncilNumber(e.target.value)}
+                />
+              )}
+            </Field>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setNewPrescriber(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                className="flex-1"
+                disabled={!prescriberName.trim()}
+                loading={addPrescriber.isPending}
+                onClick={() => addPrescriber.mutate()}
+              >
+                Add prescriber
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Field label="Prescriber">
+            {(id) => (
+              <div className="flex gap-2">
+                <Select
+                  id={id}
+                  value={prescriber}
+                  onChange={(e) => setPrescriber(e.target.value)}
+                  className="flex-1"
+                >
+                  <option value="">Not recorded</option>
+                  {(prescribers.data?.results ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.full_name}
+                      {row.council_number ? ` · ${row.council_number}` : ""}
+                    </option>
+                  ))}
+                </Select>
+                <Button variant="secondary" onClick={() => setNewPrescriber(true)}>
+                  New
+                </Button>
+              </div>
+            )}
+          </Field>
+        )}
+
+        <Field label="Issued on">
+          {(id) => (
+            <Input
+              id={id}
+              type="date"
+              value={issuedOn}
+              onChange={(e) => setIssuedOn(e.target.value)}
+            />
+          )}
+        </Field>
+
+        <Field label="Reference" help="The number on the paper, if any.">
+          {(id) => (
+            <Input id={id} value={number} onChange={(e) => setNumber(e.target.value)} />
+          )}
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
+
+/* Stored values, from sales/models.py PatientAllergy.severity. */
+const SEVERITIES = [
+  ["SEVERE", "Severe"],
+  ["MODERATE", "Moderate"],
+  ["MILD", "Mild"],
+  ["UNKNOWN", "Not known"],
+] as const;
+
+/* What this patient reacts to.
+ *
+ * The point of entry for the only clinical check Medix performs. It is
+ * not advice: it is an equality between something a pharmacist wrote
+ * down and an ingredient on the product, surfaced at the counter for a
+ * pharmacist to clear. With nothing recorded the check matches nothing
+ * and passes every time. */
+function Allergies({ patientId }: { patientId: string }) {
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [allergen, setAllergen] = useState("");
+  const [severity, setSeverity] = useState<string>("UNKNOWN");
+  const [failure, setFailure] = useState("");
+
+  const patients = useQuery({
+    queryKey: ["patients"],
+    queryFn: () => api.patients(),
+  });
+  const patient = (patients.data?.results ?? []).find((p) => p.id === patientId);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.recordAllergy({ patient: patientId, allergen, severity }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      setAdding(false);
+      setAllergen("");
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not recorded."),
+  });
+
+  const allergies = patient?.allergies ?? [];
+
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-body font-medium text-text">Allergies</span>
+        {!adding && (
+          <Button variant="secondary" onClick={() => setAdding(true)}>
+            Add
+          </Button>
+        )}
+      </div>
+
+      {failure && (
+        <Banner tone="bad" className="mb-2">
+          {failure}
+        </Banner>
+      )}
+
+      {allergies.length === 0 ? (
+        <p className="text-help text-text-2">
+          None recorded. The counter check has nothing to match.
+        </p>
+      ) : (
+        <ul className="flex flex-wrap gap-1.5">
+          {allergies.map((row) => (
+            <li key={row.id}>
+              <Badge tone={row.severity === "SEVERE" ? "bad" : "warn"}>
+                {row.allergen}
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {adding && (
+        <div className="mt-3 flex flex-col gap-3">
+          <Field label="Allergen" help="The substance, as the patient names it." required>
+            {(id) => (
+              <Input
+                id={id}
+                value={allergen}
+                onChange={(e) => setAllergen(e.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Severity">
+            {(id) => (
+              <Select
+                id={id}
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value)}
+              >
+                {SEVERITIES.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              className="flex-1"
+              disabled={!allergen.trim()}
+              loading={save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Record
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

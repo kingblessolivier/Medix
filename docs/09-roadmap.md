@@ -101,7 +101,16 @@ VAT classification for the full product mix · GS1 mandate dates for Rwanda · c
 
 ## Phase 5 — Insurance
 
-*Deferred until V3 is answered. Shape depends on the answer.*
+**Built, with both shapes modelled.** V3 remains open, and the mitigation
+`docs/11` R3 already named is what unblocked it: `SchemeContract.model`
+carries the reimbursement shape, so answering V3 later selects a contract
+row rather than forcing a rewrite.
+
+They are genuinely different workflows, not one with a different rate.
+Fee-for-service raises a claim per covered sale. **Capitation raises
+none** — the scheme has already paid for the period, so claiming as well
+would be asking twice, and the question becomes utilisation against the
+money received.
 
 - Schemes, contracts, selective contracting status
 - Coverage rules as versioned configuration
@@ -116,7 +125,15 @@ VAT classification for the full product mix · GS1 mandate dates for Rwanda · c
 
 ## Phase 6 — Compliance and cold chain
 
-*Can run in parallel with 4–5; grouped here because it shares a reviewer.*
+**Built.** Licence and registration expiry alerting, the compliance
+dashboard, the recall console with per-location execution and full
+trace, witnessed disposal with a certificate, and GS1 DataMatrix parsing
+all exist — and so, now, does the sensor half: registered probes, an
+append-only reading log, excursion detection with a grace window that
+tells a door being opened from a fault, and automatic quarantine of
+cold-chain stock in the affected location. Recovery closes the excursion
+and does **not** release the stock; whether a batch is still safe is a
+pharmacist's judgement, recorded with a reason.
 
 - Premises licences and pharmacist registrations with expiry alerting
 - Compliance dashboard
@@ -133,7 +150,10 @@ VAT classification for the full product mix · GS1 mandate dates for Rwanda · c
 
 ## Phase 7 — Intelligence
 
-*Only meaningful once phases 1–4 have generated real data.*
+**Built.** Margin by category and product from batch cost, best sellers
+by units, slow movers sorted never-sold first, stock-outs inferred from
+demand against holding, and the performance dashboard. Vendor price-change
+alerting and the accounting export remain.
 
 - Margin by category, product, branch — computed from batch cost
 - Vendor profitability and price-change alerting
@@ -147,6 +167,26 @@ VAT classification for the full product mix · GS1 mandate dates for Rwanda · c
 ---
 
 ## Phase 8 — Assistant and polish
+
+**Built.** The command palette and global search, the Assistant, the
+copy pass and the accessibility audit.
+
+The Assistant is deliberately not a language model. A pharmacist asking
+"which batches expire in 60 days" needs the right rows, and a system
+that answers plausibly when it does not know is worse here than one that
+says it does not know. So it is a small explicit grammar over service
+functions that are already tested: eleven intents, a search fallback,
+and three refusals — no clinical advice at any confidence, no figure
+called "net profit", and nothing that moves stock, money or a regulated
+record without a person confirming it. That last one is enforced by
+shape rather than discipline: `ask()` has no path to a service that
+writes, and `confirm()` only runs a whitelisted action from a stored
+proposal that expires.
+
+The copy and accessibility passes are scripts rather than a one-off
+review — `scripts/validate-copy.mjs` counts the docs/23 limits and
+`scripts/validate-a11y.mjs` catches the unnamed control and the
+mouse-only row, both under `npm run check`, so neither can drift back.
 
 - Command palette with actions
 - Global search across products, orders, invoices, patients, prescriptions, suppliers, batches, documents

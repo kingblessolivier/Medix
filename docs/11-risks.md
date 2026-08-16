@@ -47,9 +47,16 @@ Ranked by the cost of discovering them late. The first three are not build tasks
 
 **If discovered late.** The insurance module — eligibility, coverage calculation, claim submission, rejection handling, receivables aging — is built for a model nobody uses.
 
-**Mitigation.** `SchemeContract.model` supports both shapes. **Do not build the insurance module until this is answered** — the roadmap defers it to Phase 5 for exactly this reason.
+**Mitigation — taken.** `SchemeContract.model` carries the shape and both
+are implemented: fee-for-service raises a claim per covered sale,
+capitation raises none and reports utilisation against the period
+payment. Coverage rules, contracts and memberships are all
+effective-dated, so answering V3 selects a contract row rather than
+forcing a rewrite.
 
-**Action — V3.** Confirm with RSSB. **Blocking for Phase 5.**
+**Action — V3.** Confirm with RSSB. **No longer blocking** — it now
+decides which contracts a live deployment configures, which is an
+operational choice rather than an architectural one.
 
 ---
 
@@ -171,7 +178,7 @@ Tracked as Phase 0 tasks.
 |---|---|---|---|---|
 | V1 | Cloud-hosted per-tenant VSDC permissible? | RRA | Architecture | Open |
 | V2 | Data residency / cross-border transfer | NCSA, legal | Infrastructure region | Open |
-| V3 | CBHI capitation for contracted private pharmacies? | RSSB | Insurance module | Open |
+| V3 | CBHI capitation for contracted private pharmacies? | RSSB | Which contracts to configure | Open, not blocking |
 | V4 | VAT classification for the product mix | Tax adviser | Tax configuration | Open |
 | V5 | GS1 mandate dates for Rwanda | Rwanda FDA | Serialization scope | Open |
 | V6 | Retail and wholesale facility standards, current revision | Rwanda FDA | Licence rules | Open |

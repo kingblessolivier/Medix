@@ -6,7 +6,7 @@ Three templates cover nearly everything:
 
 | Template | Structure | Used by |
 |---|---|---|
-| **List** | Page header → toolbar → DataTable → detail drawer | Products, stock, orders, claims, batches, documents |
+| **List** | Page header → toolbar → DataTable → detail modal | Products, stock, orders, claims, batches |
 | **Transaction** | Document header → tabs → sections → item grid → approval timeline | PO, GRN, invoice, claim, import request |
 | **Console** | Header → status → grouped sections → timeline → activity | Import request, recall, compliance |
 
@@ -156,7 +156,7 @@ Columns: ☐ · Product · Batch · Expiry · Qty · Location · Status. Filters
 
 Expiry rendered as a semantic dot plus text — never colour alone.
 
-**Row click → drawer:** product, batch, stock, expiry, supplier, last movement, `View full history`.
+**Row click → modal:** product, batch, stock, expiry, supplier, last movement, `View full history`.
 
 ---
 
@@ -308,10 +308,37 @@ Variance beyond a configurable threshold requires a reason before closing. This 
 - [ ] No new colour, size, spacing or radius introduced
 - [ ] Lucide icons only, 16–18px, stroke 1.75–2
 - [ ] Uses `DataTable` for any data list
-- [ ] Drawer for inspection; full page only for a genuine workflow
+- [ ] Modal for inspection; full page only for a genuine workflow
 - [ ] Loading, empty and error states all present
 - [ ] Correct in both themes
 - [ ] Keyboard operable, visible focus, accessible names
 - [ ] Numeric columns use tabular figures
 - [ ] Status never conveyed by colour alone
 - [ ] UI copy within the length limits in docs/23-ui-copy.md
+
+
+---
+
+## Documents are not a screen
+
+There is no document centre, and there is no Documents entry in the
+navigation. A document is an output of the operation that produced it, so
+it lives on that operation's row: a `Documents` column of chips —
+`Delivery note · Invoice` — that opens the document itself.
+
+Three reasons this is better than a filing screen:
+
+1. A pharmacist looking for the delivery note for `PO-2026-00001` is
+   already looking at `PO-2026-00001`. Sending them elsewhere to filter
+   by date and find it again is a detour the system invented for its own
+   convenience.
+2. The chips read as progress. An order showing `PO · Invoice · Delivery
+   note` is further along than one showing `PO`, and that lands from the
+   table without opening anything.
+3. Nothing has to be filed. Documents are raised by workflows, never by a
+   person, so a filing screen would only ever be a second place to look.
+
+The chain is resolved server-side — `?related=<order>` returns the
+delivery note on its shipment, the invoice on its invoice and the GRN on
+its receipt, because a pharmacist means all of them. See
+`components/data/DocumentChips.tsx` and `docs/31-operations.md`.

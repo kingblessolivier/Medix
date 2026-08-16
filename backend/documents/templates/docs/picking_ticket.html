@@ -1,0 +1,61 @@
+{% extends "docs/base_document.html" %}
+{% comment %}
+Internal. The picker never sees a price — this is a walk through the
+warehouse, and a value column would only invite pricing questions on the
+floor. FEFO order, batch named, so the nearest carton is not the one
+that gets taken.
+{% endcomment %}
+
+{% block meta %}
+<dt>Order</dt><dd class="mono">{{ order_number }}</dd>
+<dt>From</dt><dd>{{ from_location }}</dd>
+{% endblock %}
+
+{% block body %}
+<section class="section">
+  <h2 class="section-title">Pick in this order</h2>
+  <table class="items">
+    <thead>
+      <tr>
+        <th style="width:8mm">✓</th>
+        <th>Product</th>
+        <th>Batch</th>
+        <th>Expiry</th>
+        <th class="num">Quantity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>☐</td>
+        <td>
+          {{ line.product }}
+          {% if line.strength %}<span class="sub">{{ line.strength }}</span>{% endif %}
+          {% if line.cold_chain %}<span class="sub">Cold chain · 2–8°C</span>{% endif %}
+        </td>
+        <td class="mono">{{ line.batch }}</td>
+        <td class="mono">{{ line.expiry }}</td>
+        <td class="num">{{ line.quantity }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+
+{% block attestation %}
+<p class="label">Picked by</p>
+<div class="signatures">
+  <div class="sig">
+    <p class="rule"></p>
+    <p class="who">Name</p>
+    <p class="role">Warehouse</p>
+  </div>
+  <div class="sig">
+    <p class="rule"></p>
+    <p class="who">Checked by</p>
+    <p class="role">Responsible pharmacist</p>
+  </div>
+</div>
+<p class="note">Expiry order is not a suggestion. Report any batch that does not match.</p>
+{% endblock %}
