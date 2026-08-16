@@ -26,6 +26,8 @@ import { AssistantScreen } from "@/modules/assistant/AssistantScreen";
 import { ColdChainScreen } from "@/modules/coldchain/ColdChainScreen";
 import { DayEndScreen } from "@/modules/dayend/DayEndScreen";
 import { ListingsScreen } from "@/modules/listings/ListingsScreen";
+import { OpeningStockScreen } from "@/modules/golive/OpeningStockScreen";
+import { StockCountScreen } from "@/modules/counting/StockCountScreen";
 import { SchemesScreen } from "@/modules/insurance/SchemesScreen";
 import { RecallScreen } from "@/modules/recall/RecallScreen";
 import { ReturnsScreen } from "@/modules/returns/ReturnsScreen";
@@ -159,6 +161,10 @@ export default function App() {
           <PharmaciesScreen />
         ) : active === "settings" ? (
           <SettingsScreen />
+        ) : active === "counting" ? (
+          <StockCountScreen />
+        ) : active === "opening" ? (
+          <OpeningStockScreen />
         ) : active === "schemes" && canSell ? (
           <SchemesScreen />
         ) : active === "listings" && canSupply ? (

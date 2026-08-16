@@ -542,6 +542,61 @@ export type BatchTrace = {
   on_hand_base: number;
 };
 
+export type ControlledEntry = {
+  id: string;
+  patient_name: string;
+  patient_address: string;
+  substance_denomination: string;
+  schedule: string;
+  quantity_base: number;
+  uom_code: string;
+  dispensed_by_name: string;
+  dispensed_by_council_number: string;
+  /** The running balance the register is required to carry. */
+  balance_after_base: number;
+  entered_at: string;
+};
+
+export type StockCountLine = {
+  id: string;
+  batch: string;
+  batch_number: string;
+  product_name: string;
+  /** What the ledger said when this line was counted, not now. */
+  expected_base: number;
+  counted_base: number;
+  variance_base: number;
+  /** What the difference is worth, at this batch's own cost. */
+  variance_value: number;
+  reason: string;
+  needs_a_reason: boolean;
+};
+
+export type StockCount = {
+  id: string;
+  reference: string;
+  location: string;
+  location_name: string;
+  status: string;
+  counted_by: string | null;
+  counted_by_name: string;
+  submitted_at: string | null;
+  approved_at: string | null;
+  note: string;
+  variance_base: number;
+  lines: StockCountLine[];
+};
+
+export type FiscalException = {
+  id: string;
+  sale_number: string;
+  status: string;
+  error_code: string;
+  error_message: string;
+  attempts: number;
+  created_at: string;
+};
+
 export type SchemeContract = {
   id: string;
   scheme: string;
@@ -1626,6 +1681,76 @@ export const api = {
     request<MarketplaceRow>(`/listings/${id}/tiers/`, {
       method: "POST",
       body: { tiers },
+    }),
+
+  /* -- the controlled register --------------------------------------------
+
+     Written on every controlled sale since the till was built. This is
+     the read an inspector asks for. */
+  controlledRegister: () => request<ControlledEntry[]>("/controlled-register/"),
+
+  /* -- stock counts --------------------------------------------------------
+
+     The count is not the correction: a counter records what is on the
+     shelf, and somebody who can authorise it approves before the ledger
+     moves. */
+  stockCounts: (status = "") =>
+    request<Paginated<StockCount>>(
+      `/stock-counts/${status ? `?status=${status}` : ""}`,
+    ),
+  openCount: (location: string) =>
+    request<StockCount>("/stock-counts/", { method: "POST", body: { location } }),
+  countBatch: (
+    id: string,
+    body: { batch: string; counted_base: number; reason?: string },
+  ) => request<StockCount>(`/stock-counts/${id}/lines/`, { method: "POST", body }),
+  submitCount: (id: string) =>
+    request<StockCount>(`/stock-counts/${id}/submit/`, { method: "POST", body: {} }),
+  approveCount: (id: string) =>
+    request<{ adjusted: number; net_base: number; reference: string }>(
+      `/stock-counts/${id}/approve/`,
+      { method: "POST", body: {} },
+    ),
+  cancelCount: (id: string, reason: string) =>
+    request<StockCount>(`/stock-counts/${id}/cancel/`, {
+      method: "POST",
+      body: { reason },
+    }),
+
+  /* -- go-live ------------------------------------------------------------
+
+     Opening stock is not a receipt. Recording it as one says the pharmacy
+     bought everything on its first day, which inflates that period's
+     purchases and makes the first month's margin meaningless. */
+  loadOpeningStock: (body: {
+    location: string;
+    rows: {
+      product: string;
+      batch_number: string;
+      expiry_date: string;
+      quantity: number;
+      uom_code?: string;
+      unit_cost_base?: number;
+    }[];
+    counted_on?: string;
+  }) =>
+    request<{
+      batches: number;
+      movements: number;
+      base_units: number;
+      skipped: { row: number; reason: string }[];
+    }>("/stock/opening/", { method: "POST", body }),
+
+  /* -- fiscal ------------------------------------------------------------
+
+     A sale is never silently unfiscalized: it either carries an accepted
+     invoice or it is here. Retrying is safe — the record is keyed on the
+     sale, so a resubmission cannot double-fiscalize it. */
+  fiscalExceptions: () => request<FiscalException[]>("/fiscal/exceptions/"),
+  retryFiscal: (recordId: string) =>
+    request<{ id: string; status: string }>("/fiscal/exceptions/", {
+      method: "POST",
+      body: { record: recordId },
     }),
 
   /* -- tills, shifts and day end -----------------------------------------

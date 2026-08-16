@@ -17,6 +17,8 @@ import { Info, Loader2, ScanBarcode, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiFailure, api, type ProductRow, type Sale, type SaleLine } from "@/lib/api";
+import * as offline from "@/lib/offline";
+import { startDraining } from "@/lib/sync";
 import { Banner, Button, EmptyState, PageHeader, StatusDot } from "@/components/ui";
 import { AlertStack } from "@/components/ui/AlertStack";
 
@@ -26,10 +28,24 @@ function money(minor: number): string {
   return CURRENCY.format(minor);
 }
 
+/** A line rung up with no connection, in the shape the server replays. */
+type OfflineLine = {
+  product: string;
+  product_name: string;
+  quantity: number;
+  uom_code: string;
+  unit_price: number;
+};
+
 export function PosScreen({ locationId }: { locationId: string | null }) {
   const queryClient = useQueryClient();
   const [saleId, setSaleId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  /* Lines rung up with no connection. Held here rather than on the
+     server for the obvious reason. */
+  const [offlineLines, setOfflineLines] = useState<OfflineLine[]>([]);
+  const [waiting, setWaiting] = useState(0);
+  const [online, setOnline] = useState(() => navigator.onLine);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const sale = useQuery({
@@ -111,6 +127,31 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
     onSuccess: (updated) => queryClient.setQueryData(["sale", saleId], updated),
   });
 
+  /* The counter when there is no counter to talk to.
+   *
+   * Journalled with what this screen already knows and replayed through
+   * the ordinary service path on reconnection, so the offline route is
+   * not the way around the prescription gate. See lib/offline.ts. */
+  const offlineSale = useMutation({
+    mutationFn: async ({ method }: { method: string }) => {
+      const entry = await offline.record("sale", {
+        location: locationId!,
+        lines: offlineLines.map((line) => ({
+          product: line.product,
+          quantity: line.quantity,
+          uom_code: line.uom_code,
+          unit_price: line.unit_price,
+        })),
+        payments: [{ method, amount: offlineTotal }],
+      });
+      return entry;
+    },
+    onSuccess: () => {
+      setOfflineLines([]);
+      void refreshJournal();
+    },
+  });
+
   // Start a sale as soon as the counter is open, so the first scan lands
   // somewhere without an extra click. Guarded by a ref because StrictMode
   // double-invokes effects and would otherwise open two draft sales.
@@ -122,6 +163,33 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
     starting.current = true;
     start.mutate(undefined, { onSettled: () => (starting.current = false) });
   }, [locationId, saleId, shifts.isPending]);
+
+  const refreshJournal = async () => {
+    if (!offline.journalWorks) return;
+    const counted = await offline.counts();
+    setWaiting(counted.pending + counted.failed);
+  };
+
+  useEffect(() => {
+    void refreshJournal();
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    // One drainer for the tab. It backs off when there is nobody
+    // listening and tries immediately when the network returns.
+    const stop = startDraining("BROWSER-TILL", () => void refreshJournal());
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+      stop();
+    };
+  }, []);
+
+  const offlineTotal = offlineLines.reduce(
+    (total, line) => total + line.unit_price * line.quantity,
+    0,
+  );
 
   if (!locationId) {
     return (
@@ -190,8 +258,21 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
                     <button
                       key={product.id}
                       type="button"
-                      disabled={none}
-                      onClick={() => addLine.mutate(product)}
+                      disabled={none || (!online && product.requires_prescription)}
+                      onClick={() =>
+                        online
+                          ? addLine.mutate(product)
+                          : setOfflineLines((current) => [
+                              ...current,
+                              {
+                                product: product.id,
+                                product_name: product.name,
+                                quantity: 1,
+                                uom_code: "UNIT",
+                                unit_price: 100,
+                              },
+                            ])
+                      }
                       className="flex w-full items-center justify-between gap-3 border-b border-hair px-3 py-2.5 text-left last:border-0 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
                     >
                       <span className="min-w-0">
@@ -199,7 +280,9 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
                         <span className="block text-help text-text-3">
                           {none
                             ? "None on the shelf"
-                            : `${product.on_hand_base.toLocaleString()} ${product.base_uom_name.toLowerCase()}`}
+                            : !online && product.requires_prescription
+                              ? "Needs a connection to dispense"
+                              : `${product.on_hand_base.toLocaleString()} ${product.base_uom_name.toLowerCase()}`}
                         </span>
                       </span>
                       {product.requires_prescription && (
@@ -212,7 +295,47 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
             </div>
           )}
 
-          {lines.length === 0 ? (
+          {!online ? (
+            offlineLines.length === 0 ? (
+              <EmptyState
+                heading="Nothing scanned"
+                body="Sales are held here and sent when the connection returns."
+              />
+            ) : (
+              <div className="overflow-hidden rounded-lg border border-border bg-surface">
+                {offlineLines.map((line, index) => (
+                  <div
+                    key={`${line.product}-${index}`}
+                    className="flex items-baseline justify-between gap-3 border-b border-hair px-3 py-2.5 last:border-0"
+                  >
+                    <span className="min-w-0 truncate text-body">
+                      {line.product_name}
+                      <span className="ml-2 text-help text-text-3">
+                        {line.quantity} × {money(line.unit_price)}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-3">
+                      <span className="tabular text-body">
+                        {money(line.unit_price * line.quantity)}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${line.product_name}`}
+                        onClick={() =>
+                          setOfflineLines((current) =>
+                            current.filter((_, i) => i !== index),
+                          )
+                        }
+                        className="text-text-3 hover:text-bad"
+                      >
+                        <Trash2 size={15} strokeWidth={1.9} aria-hidden />
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : lines.length === 0 ? (
             <EmptyState heading="Nothing scanned" />
           ) : (
             <div className="overflow-hidden rounded-lg border border-border bg-surface">
@@ -234,6 +357,16 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
                 </button>
               </div>
             </div>
+          )}
+
+          {!online && (
+            <Banner tone="warn">
+              {`Offline. Selling continues${waiting ? ` · ${waiting} waiting` : ""}.`}
+            </Banner>
+          )}
+
+          {online && waiting > 0 && (
+            <Banner tone="info">{`${waiting} sales still to send.`}</Banner>
           )}
 
           {!shifts.isPending && !openShift && (
@@ -319,10 +452,30 @@ export function PosScreen({ locationId }: { locationId: string | null }) {
             )}
           </div>
 
-          {/* `current` is undefined until the sale loads. Without this
-              guard the payment panel renders against nothing and takes
-              the whole screen down. */}
-          {!current ? null : isDraft ? (
+          {/* No connection: the totals and the tender are worked out
+              here, and the whole sale is journalled on payment. */}
+          {!online ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-baseline justify-between border-t border-border pt-2">
+                <span className="text-body font-medium">Total</span>
+                <span className="tabular text-metric font-semibold">
+                  {money(offlineTotal)}
+                </span>
+              </div>
+              {(["CASH", "MOBILE_MONEY"] as const).map((method) => (
+                <Button
+                  key={method}
+                  variant={method === "CASH" ? "primary" : "secondary"}
+                  className="h-11 w-full"
+                  disabled={offlineLines.length === 0}
+                  loading={offlineSale.isPending}
+                  onClick={() => offlineSale.mutate({ method })}
+                >
+                  {method === "CASH" ? "Take cash" : "Mobile money"}
+                </Button>
+              ))}
+            </div>
+          ) : !current ? null : isDraft ? (
             <Button
               variant="primary"
               className="h-11 w-full"

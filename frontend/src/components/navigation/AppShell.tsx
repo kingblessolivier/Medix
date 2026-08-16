@@ -13,6 +13,7 @@ import {
   Calculator,
   Building2,
   ChartNoAxesCombined,
+  ClipboardCheck,
   ClipboardList,
   HeartPulse,
   LayoutDashboard,
@@ -20,6 +21,7 @@ import {
   Moon,
   Package,
   PackageCheck,
+  PackageOpen,
   PackagePlus,
   Receipt,
   Search,
@@ -55,6 +57,9 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   const operations: NavItem[] = [
     { id: "inventory", label: "Inventory", icon: Package },
     { id: "catalogue", label: "Catalogue", icon: BookOpen },
+    // Go-live. Nothing else here describes anything until the
+    // shelves a pharmacy already has exist in the ledger.
+    { id: "opening", label: "Opening stock", icon: PackageOpen },
   ];
   if (can("SELL_RETAIL")) {
     operations.push({ id: "pos", label: "Point of sale", icon: Receipt });
@@ -64,6 +69,7 @@ export function navigationFor(capabilities: string[]): NavGroup[] {
   }
   operations.push({ id: "transfers", label: "Transfers", icon: ArrowLeftRight });
   operations.push({ id: "returns", label: "Returns", icon: Undo2 });
+  operations.push({ id: "counting", label: "Stock count", icon: ClipboardCheck });
   // The one alert that acts rather than warns, so it needs somewhere
   // to be seen: an excursion holds stock without asking anybody.
   operations.push({ id: "coldchain", label: "Cold chain", icon: Snowflake });

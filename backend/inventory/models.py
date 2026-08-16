@@ -292,3 +292,14 @@ class Allocation:
 # --------------------------------------------------------------------------
 
 from inventory.telemetry import Excursion, Reading, Sensor  # noqa: E402,F401
+
+
+# --------------------------------------------------------------------------
+# Stock counts
+#
+# Declared here for the same reason as the cold-chain tables above: a
+# model is registered when the module defining it is imported, and a
+# lazily-imported module makes the app registry depend on import order.
+# --------------------------------------------------------------------------
+
+from inventory.counting import StockCount, StockCountLine  # noqa: E402,F401

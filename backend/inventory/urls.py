@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from inventory import views
 
 router = DefaultRouter()
+router.register("stock-counts", views.StockCountViewSet, basename="stock-count")
 router.register("locations", views.LocationViewSet, basename="location")
 router.register("batches", views.BatchViewSet, basename="batch")
 router.register("stock", views.StockViewSet, basename="stock")
@@ -14,6 +15,7 @@ router.register("stock-movements", views.StockMovementViewSet, basename="stock-m
 urlpatterns = [
     path("allocations/preview/", views.AllocationPreviewView.as_view(), name="allocation-preview"),
     path("stock/receive/", views.ReceiveStockView.as_view(), name="stock-receive"),
+    path("stock/opening/", views.OpeningBalanceView.as_view(), name="stock-opening"),
     path("stock/adjust/", views.AdjustStockView.as_view(), name="stock-adjust"),
     # transfer · quarantine · supplier-return · recall
     path(

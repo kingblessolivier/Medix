@@ -29,7 +29,12 @@ import {
 import { Modal } from "@/components/ui/Modal";
 import { Consequence, NextAction } from "@/components/ui/Guidance";
 import { AlertStack } from "@/components/ui/AlertStack";
-import { ApiFailure, api, type ComplianceState } from "@/lib/api";
+import {
+  ApiFailure,
+  api,
+  type ComplianceState,
+  type ControlledEntry,
+} from "@/lib/api";
 
 const DAY = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
@@ -189,6 +194,8 @@ export function ComplianceScreen() {
         emptyHeading="No registrations"
         emptyBody="Stock can be held. Nothing can be dispensed."
       />
+
+      <ControlledRegister />
 
       {renewing === "licence" && <LicenceModal onClose={() => setRenewing(null)} />}
       {renewing === "registration" && (
@@ -437,5 +444,92 @@ function RegistrationModal({ onClose }: { onClose: () => void }) {
         </Field>
       </div>
     </Modal>
+  );
+}
+
+
+/* The statutory register.
+ *
+ * Every entry here has been written on every controlled sale since the
+ * till was built — patient, address, dispensing pharmacist, council
+ * number, running balance. What was missing was the register itself: the
+ * thing an inspector asks to see, which until now could only be produced
+ * by reading the database.
+ *
+ * On this screen because that is where somebody preparing for an
+ * inspection is already standing. Nobody browses it for pleasure. */
+function ControlledRegister() {
+  const entries = useQuery({
+    queryKey: ["controlled-register"],
+    queryFn: () => api.controlledRegister(),
+  });
+
+  const rows = entries.data ?? [];
+
+  return (
+    <>
+      <h2 className="mb-2 mt-8 text-section font-semibold text-text">
+        Controlled register
+      </h2>
+      <DataTable
+        columns={[
+          {
+            key: "when",
+            header: "Dispensed",
+            render: (e: ControlledEntry) => DAY.format(new Date(e.entered_at)),
+          },
+          {
+            key: "substance",
+            header: "Substance",
+            render: (e: ControlledEntry) => e.substance_denomination,
+          },
+          { key: "schedule", header: "Schedule", render: (e: ControlledEntry) => e.schedule },
+          {
+            key: "patient",
+            header: "Patient",
+            render: (e: ControlledEntry) => (
+              <span>
+                {e.patient_name}
+                {e.patient_address && (
+                  <span className="ml-2 text-help text-text-3">{e.patient_address}</span>
+                )}
+              </span>
+            ),
+          },
+          {
+            key: "quantity",
+            header: "Quantity",
+            numeric: true,
+            render: (e: ControlledEntry) =>
+              `${e.quantity_base.toLocaleString()} ${e.uom_code.toLowerCase()}`,
+          },
+          {
+            key: "by",
+            header: "Dispensed by",
+            render: (e: ControlledEntry) => (
+              <span>
+                {e.dispensed_by_name}
+                <span className="ml-2 font-mono text-help text-text-3">
+                  {e.dispensed_by_council_number}
+                </span>
+              </span>
+            ),
+          },
+          {
+            key: "balance",
+            header: "Balance",
+            numeric: true,
+            render: (e: ControlledEntry) => e.balance_after_base.toLocaleString(),
+          },
+        ]}
+        rows={rows}
+        rowKey={(e) => e.id}
+        density="compact"
+        loading={entries.isLoading}
+        caption="Controlled substances register"
+        emptyHeading="No entries"
+        emptyBody="Written automatically when a controlled line is dispensed."
+      />
+    </>
   );
 }

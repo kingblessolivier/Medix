@@ -31,6 +31,7 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { Modal } from "@/components/ui/Modal";
+import { Consequence } from "@/components/ui/Guidance";
 import {
   ApiFailure,
   api,
@@ -638,8 +639,45 @@ function ThresholdModal({
   );
 }
 
+/* Stored values, from catalog/models.py TaxTreatment — "ZERO", not
+   "ZERO_RATED". The enum guard caught that one; it is the fifth invented
+   value it has found and the reason it exists. */
+const TREATMENTS = [
+  ["STANDARD", "Standard rated"],
+  ["ZERO", "Zero rated"],
+  ["EXEMPT", "Exempt"],
+] as const;
+
 function TaxRules() {
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [treatment, setTreatment] = useState<string>("STANDARD");
+  const [percent, setPercent] = useState("18");
+  const [from, setFrom] = useState("");
+  const [failure, setFailure] = useState("");
+
   const rules = useQuery({ queryKey: ["tax-rules"], queryFn: () => api.taxRules() });
+
+  /* A rate change is a new row, never an edit. A sale from six months
+     ago has to stay explainable under the rate that applied then, and
+     rewriting the old row would silently restate its tax. */
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveTaxRule({
+        treatment,
+        // Basis points, never a float: 18% is 1800, and a rate that
+        // drifts in the fourth decimal across two screens invites the
+        // question of which one is lying.
+        rate_basis_points: Math.round(Number(percent) * 100),
+        effective_from: from,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tax-rules"] });
+      setAdding(false);
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not saved."),
+  });
 
   const columns: Column<TaxRule>[] = [
     { key: "treatment", header: "Treatment", render: (r) => r.treatment },
@@ -662,6 +700,15 @@ function TaxRules() {
   return (
     <>
       <DatedNotice />
+      <div className="mb-3 flex justify-end">
+        <Button
+          variant="primary"
+          icon={<Plus size={15} strokeWidth={2} aria-hidden />}
+          onClick={() => setAdding(true)}
+        >
+          Add rate
+        </Button>
+      </div>
       <DataTable
         columns={columns}
         rows={rules.data?.results ?? []}
@@ -671,14 +718,119 @@ function TaxRules() {
         emptyHeading="No tax rules"
         emptyBody="A sale cannot price a standard-rated item without one."
       />
+
+      {adding && (
+        <Modal
+          open
+          title="Add rate"
+          onClose={() => setAdding(false)}
+          footer={
+            <Button
+              variant="primary"
+              className="w-full"
+              disabled={!from}
+              loading={save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Add rate
+            </Button>
+          }
+        >
+          <Consequence
+            lines={[
+              "Applies to sales from its start date onward.",
+              "Earlier sales keep the rate that applied then.",
+            ]}
+          />
+          {failure && (
+            <Banner tone="bad" className="mt-3">
+              {failure}
+            </Banner>
+          )}
+          <div className="mt-4 flex flex-col gap-4">
+            <Field label="Treatment" required>
+              {(id) => (
+                <Select
+                  id={id}
+                  value={treatment}
+                  onChange={(e) => setTreatment(e.target.value)}
+                >
+                  {TREATMENTS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <Field label="Rate" help="Percent. Stored as basis points." required>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={percent}
+                  onChange={(e) => setPercent(e.target.value)}
+                  className="tabular text-right"
+                />
+              )}
+            </Field>
+            <Field label="Effective from" required>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="date"
+                  value={from}
+                  onChange={(e) => setFrom(e.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
 
+/* Stored values, from core/models.py QuotaPeriod. */
+const QUOTA_PERIODS = [
+  ["MONTH", "Per month"],
+  ["QUARTER", "Per quarter"],
+  ["YEAR", "Per year"],
+] as const;
+
 function Quotas() {
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [schedule, setSchedule] = useState("I");
+  const [period, setPeriod] = useState<string>("MONTH");
+  const [limit, setLimit] = useState("");
+  const [authority, setAuthority] = useState("");
+  const [from, setFrom] = useState("");
+  const [failure, setFailure] = useState("");
+
   const quotas = useQuery({
     queryKey: ["controlled-quotas"],
     queryFn: () => api.controlledQuotas(),
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveControlledQuota({
+        schedule,
+        period,
+        limit_base: Number(limit) || 0,
+        authority_reference: authority,
+        effective_from: from,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["controlled-quotas"] });
+      setAdding(false);
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not saved."),
   });
 
   const columns: Column<ControlledQuota>[] = [
@@ -704,6 +856,15 @@ function Quotas() {
   return (
     <>
       <DatedNotice />
+      <div className="mb-3 flex justify-end">
+        <Button
+          variant="primary"
+          icon={<Plus size={15} strokeWidth={2} aria-hidden />}
+          onClick={() => setAdding(true)}
+        >
+          Add quota
+        </Button>
+      </div>
       <DataTable
         columns={columns}
         rows={quotas.data?.results ?? []}
@@ -713,6 +874,90 @@ function Quotas() {
         emptyHeading="No quotas recorded"
         emptyBody="No quota on file means the check does not apply."
       />
+
+      {adding && (
+        <Modal
+          open
+          title="Add quota"
+          onClose={() => setAdding(false)}
+          footer={
+            <Button
+              variant="primary"
+              className="w-full"
+              disabled={!from || !limit}
+              loading={save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Add quota
+            </Button>
+          }
+        >
+          <Consequence
+            lines={[
+              "Caps what may be dispensed in the period.",
+              "Throughput, not what is held on the shelf.",
+            ]}
+          />
+          {failure && (
+            <Banner tone="bad" className="mt-3">
+              {failure}
+            </Banner>
+          )}
+          <div className="mt-4 flex flex-col gap-4">
+            <Field label="Schedule" help="As the authority names it." required>
+              {(id) => (
+                <Input
+                  id={id}
+                  value={schedule}
+                  onChange={(e) => setSchedule(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Period" required>
+              {(id) => (
+                <Select id={id} value={period} onChange={(e) => setPeriod(e.target.value)}>
+                  {QUOTA_PERIODS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <Field label="Limit" help="Base units per period." required>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="number"
+                  min={0}
+                  value={limit}
+                  onChange={(e) => setLimit(e.target.value)}
+                  className="tabular text-right"
+                />
+              )}
+            </Field>
+            <Field label="Authority" help="The permit this quota comes from.">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={authority}
+                  onChange={(e) => setAuthority(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Effective from" required>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="date"
+                  value={from}
+                  onChange={(e) => setFrom(e.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

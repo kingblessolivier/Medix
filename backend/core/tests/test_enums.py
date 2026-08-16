@@ -79,6 +79,11 @@ MIRRORS = [
         "IMPORT_KINDS",
         "commerce.models.ImportDocumentKind",
     ),
+    (
+        "modules/settings/SettingsScreen.tsx",
+        "TREATMENTS",
+        "catalog.models.TaxTreatment",
+    ),
 ]
 
 

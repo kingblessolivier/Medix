@@ -29,6 +29,7 @@ PREFIXES = {
     "ADJUSTMENT": "ADJ",
     "CLAIM": "CLM",
     "RFQ": "RFQ",
+    "STOCK_COUNT": "SC",
     "QUOTATION": "QUO",
     "DISPOSAL": "DSP",
     "RECALL": "REC",
