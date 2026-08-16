@@ -8,7 +8,7 @@ directly, which is the point.
 from __future__ import annotations
 
 from django_filters import rest_framework as filters
-from rest_framework import status, viewsets
+from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
@@ -21,7 +21,8 @@ from catalog.models import Product, UnitOfMeasure
 from core.exceptions import DomainError
 from core.pagination import LedgerCursorPagination
 from core.quantity import Quantity
-from inventory import movements, services
+from inventory import counting, movements, services
+from inventory.counting import StockCount
 from inventory.models import (
     Batch,
     Location,
@@ -368,3 +369,141 @@ class BatchTraceView(APIView):
                 batch=get_object_or_404(Batch.tenant_objects, pk=batch_id),
             )
         )
+
+
+class OpeningBalanceView(APIView):
+    """What is already on the shelves, on the day a pharmacy starts.
+
+    Separate from receiving on purpose. Recording go-live stock as a
+    purchase says the pharmacy bought two thousand boxes on its first
+    day: it inflates that period's purchases, invents a supplier
+    relationship, and makes the first month's margin meaningless.
+    """
+
+    def post(self, request):
+        from inventory import golive
+
+        location = get_object_or_404(
+            Location.tenant_objects, pk=request.data.get("location")
+        )
+        loaded = golive.load_opening_balances(
+            organization=request.user.organization,
+            location=location,
+            rows=request.data.get("rows") or [],
+            performed_by=request.user,
+            counted_on=request.data.get("counted_on") or None,
+        )
+        return Response(loaded.as_dict(), status=status.HTTP_201_CREATED)
+
+
+class StockCountSerializer(serializers.ModelSerializer):
+    location_name = serializers.CharField(source="location.name", read_only=True)
+    counted_by_name = serializers.SerializerMethodField()
+    lines = serializers.SerializerMethodField()
+    variance_base = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StockCount
+        fields = [
+            "id",
+            "reference",
+            "location",
+            "location_name",
+            "status",
+            "counted_by",
+            "counted_by_name",
+            "submitted_at",
+            "approved_at",
+            "note",
+            "variance_base",
+            "lines",
+        ]
+
+    def get_counted_by_name(self, count) -> str:
+        user = count.counted_by
+        return (user.get_full_name() or user.username) if user else ""
+
+    def get_variance_base(self, count) -> int:
+        return sum(line.variance_base for line in count.lines.all())
+
+    def get_lines(self, count) -> list[dict]:
+        return [
+            {
+                "id": str(line.id),
+                "batch": str(line.batch_id),
+                "batch_number": line.batch.batch_number,
+                "product_name": line.batch.product.name,
+                "expected_base": line.expected_base,
+                "counted_base": line.counted_base,
+                "variance_base": line.variance_base,
+                "variance_value": line.variance_value,
+                "reason": line.reason,
+                "needs_a_reason": line.needs_a_reason,
+            }
+            for line in count.lines.select_related("batch__product")
+        ]
+
+
+class StockCountViewSet(
+    mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
+):
+    """Counting a room, and the adjustment that follows.
+
+    The count is not the correction. A counter writes down what is there;
+    somebody who can authorise it approves, and only then does the ledger
+    move — which is the control a stock take exists to provide.
+    """
+
+    serializer_class = StockCountSerializer
+
+    def get_queryset(self):
+        queryset = StockCount.tenant_objects.select_related("location", "counted_by")
+        status_filter = self.request.query_params.get("status")
+        return queryset.filter(status=status_filter) if status_filter else queryset
+
+    def create(self, request):
+        location = get_object_or_404(
+            Location.tenant_objects, pk=request.data.get("location")
+        )
+        count = counting.open_count(
+            organization=request.user.organization,
+            location=location,
+            performed_by=request.user,
+        )
+        return Response(
+            StockCountSerializer(count).data, status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=["post"], url_path="lines")
+    def add_line(self, request, pk=None):
+        count = self.get_object()
+        batch = get_object_or_404(Batch.tenant_objects, pk=request.data.get("batch"))
+        counting.record_count(
+            count=count,
+            batch=batch,
+            counted_base=int(request.data.get("counted_base", 0)),
+            reason=request.data.get("reason", ""),
+        )
+        count.refresh_from_db()
+        return Response(StockCountSerializer(count).data)
+
+    @action(detail=True, methods=["post"])
+    def submit(self, request, pk=None):
+        count = counting.submit_count(count=self.get_object(), performed_by=request.user)
+        return Response(StockCountSerializer(count).data)
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        result = counting.approve_count(
+            count=self.get_object(), performed_by=request.user
+        )
+        return Response(result)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        count = counting.cancel_count(
+            count=self.get_object(),
+            performed_by=request.user,
+            reason=request.data.get("reason", ""),
+        )
+        return Response(StockCountSerializer(count).data)

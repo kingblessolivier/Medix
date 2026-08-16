@@ -91,6 +91,8 @@ export function DayEndScreen() {
         <NoShift tills={tills.data?.results ?? []} />
       )}
 
+      <FiscalExceptions />
+
       <ClosedShifts shifts={(shifts.data?.results ?? []).filter((s) => s.status !== "OPEN")} />
 
       {closing && open && report.data && (
@@ -496,6 +498,74 @@ function ClosedShifts({ shifts }: { shifts: Shift[] }) {
                 </StatusPill>
               )}
             </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+
+/* Sales that did not fiscalize.
+ *
+ * F11: a sale either carries an accepted fiscal invoice or it appears
+ * here, and is never silently unfiscalized. The queue and its retry
+ * existed server-side from the start; the word doing the work in that
+ * requirement is *visible*, and nothing showed it.
+ *
+ * On this screen because day end is when a pharmacist is reconciling and
+ * is the one moment they will act on it. */
+function FiscalExceptions() {
+  const queryClient = useQueryClient();
+  const [failure, setFailure] = useState("");
+
+  const exceptions = useQuery({
+    queryKey: ["fiscal-exceptions"],
+    queryFn: () => api.fiscalExceptions(),
+  });
+
+  const retry = useMutation({
+    mutationFn: (id: string) => api.retryFiscal(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["fiscal-exceptions"] }),
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not resubmitted."),
+  });
+
+  const rows = exceptions.data ?? [];
+  if (rows.length === 0) return null;
+
+  return (
+    <section className="mt-8">
+      <h2 className="mb-1 text-section font-semibold text-text">Not fiscalized</h2>
+      <p className="mb-2 text-help text-text-2">
+        These sales completed. Their invoices did not.
+      </p>
+
+      {failure && (
+        <Banner tone="bad" className="mb-3">
+          {failure}
+        </Banner>
+      )}
+
+      <ul className="flex flex-col divide-y divide-hair border-y border-hair">
+        {rows.map((row) => (
+          <li key={row.id} className="flex items-baseline justify-between gap-3 py-2">
+            <span className="min-w-0">
+              <span className="block truncate font-mono text-body text-text">
+                {row.sale_number}
+              </span>
+              <span className="block truncate text-help text-text-2">
+                {row.error_message || row.error_code || row.status}
+                {row.attempts > 0 && ` · ${row.attempts} attempts`}
+              </span>
+            </span>
+            <Button
+              variant="secondary"
+              loading={retry.isPending}
+              onClick={() => retry.mutate(row.id)}
+            >
+              Resubmit
+            </Button>
           </li>
         ))}
       </ul>

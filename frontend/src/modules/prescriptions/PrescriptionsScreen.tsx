@@ -21,6 +21,7 @@ import {
 } from "@/components/data/DataTable";
 import {
   Banner,
+  Badge,
   Button,
   Field,
   Input,
@@ -419,6 +420,11 @@ function RaiseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </Field>
         )}
 
+        {/* The till checks every sale against this list. With nothing on
+            it the check matches nothing and passes every time, which
+            looks exactly like a clean result. */}
+        {!newPatient && patient && <Allergies patientId={patient} />}
+
         {newPrescriber ? (
           <div className="flex flex-col gap-3 rounded-md border border-border p-3">
             <Field label="Prescriber name" required>
@@ -502,5 +508,127 @@ function RaiseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         </Field>
       </div>
     </Modal>
+  );
+}
+
+
+/* Stored values, from sales/models.py PatientAllergy.severity. */
+const SEVERITIES = [
+  ["SEVERE", "Severe"],
+  ["MODERATE", "Moderate"],
+  ["MILD", "Mild"],
+  ["UNKNOWN", "Not known"],
+] as const;
+
+/* What this patient reacts to.
+ *
+ * The point of entry for the only clinical check Medix performs. It is
+ * not advice: it is an equality between something a pharmacist wrote
+ * down and an ingredient on the product, surfaced at the counter for a
+ * pharmacist to clear. With nothing recorded the check matches nothing
+ * and passes every time. */
+function Allergies({ patientId }: { patientId: string }) {
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [allergen, setAllergen] = useState("");
+  const [severity, setSeverity] = useState<string>("UNKNOWN");
+  const [failure, setFailure] = useState("");
+
+  const patients = useQuery({
+    queryKey: ["patients"],
+    queryFn: () => api.patients(),
+  });
+  const patient = (patients.data?.results ?? []).find((p) => p.id === patientId);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.recordAllergy({ patient: patientId, allergen, severity }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      setAdding(false);
+      setAllergen("");
+    },
+    onError: (error) =>
+      setFailure(error instanceof ApiFailure ? error.error.message : "Not recorded."),
+  });
+
+  const allergies = patient?.allergies ?? [];
+
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-body font-medium text-text">Allergies</span>
+        {!adding && (
+          <Button variant="secondary" onClick={() => setAdding(true)}>
+            Add
+          </Button>
+        )}
+      </div>
+
+      {failure && (
+        <Banner tone="bad" className="mb-2">
+          {failure}
+        </Banner>
+      )}
+
+      {allergies.length === 0 ? (
+        <p className="text-help text-text-2">
+          None recorded. The counter check has nothing to match.
+        </p>
+      ) : (
+        <ul className="flex flex-wrap gap-1.5">
+          {allergies.map((row) => (
+            <li key={row.id}>
+              <Badge tone={row.severity === "SEVERE" ? "bad" : "warn"}>
+                {row.allergen}
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {adding && (
+        <div className="mt-3 flex flex-col gap-3">
+          <Field label="Allergen" help="The substance, as the patient names it." required>
+            {(id) => (
+              <Input
+                id={id}
+                value={allergen}
+                onChange={(e) => setAllergen(e.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Severity">
+            {(id) => (
+              <Select
+                id={id}
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value)}
+              >
+                {SEVERITIES.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              className="flex-1"
+              disabled={!allergen.trim()}
+              loading={save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Record
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

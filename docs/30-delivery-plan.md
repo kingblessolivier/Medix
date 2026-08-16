@@ -962,3 +962,72 @@ made the parity audit necessary. Three are left on purpose:
 `recordAllergy`, `saveControlledQuota` and `saveTaxRule` mark real
 missing features, and deleting them would hide the gap rather than close
 it.
+
+
+---
+
+## Stage 17 — The requirement list, top to bottom
+
+Worked in the order the last audit ranked them.
+
+**F20, opening balances — the one that blocked going live.** There was no
+import path at all: `MovementKind.OPENING` existed and only the seed
+commands emitted it, and `/stock/receive/` always posts a
+`PURCHASE_RECEIPT`. A pharmacy adopting Medix had to hand-enter every
+batch, and doing it through the receive endpoint would have recorded its
+entire opening stock as purchases made on go-live day — inflating that
+period's buying and making the first month's margin meaningless.
+`inventory/golive.py` posts `OPENING` instead, refuses a batch that has
+already moved on that shelf so a second run of the same spreadsheet
+cannot double the room, and reports the rows it skipped with their row
+numbers so the sheet can be corrected and pasted again.
+
+**F12, the offline till.** Half of it already existed — the agent
+journals to SQLite and replays, with 76 tests. The half a pharmacy
+touches did not: the browser POS needed the network. It journals to
+IndexedDB now, in the same envelope shape, replayed through the same
+`/sync/` endpoint, so the server rebuilds every sale through
+`sales.services` and the offline path is not the way around the
+prescription gate. Prescription-only lines are refused offline outright:
+the gate needs server state, and journalling one would promise a check
+nobody can make until the connection returns, by which time the medicine
+has gone.
+
+**F11, the fiscal exception queue.** The list and the retry had been
+there from the start. The word doing the work in that requirement is
+*visible*, and nothing showed it — an unsigned invoice is an RRA problem
+sitting where nobody looks. It is on the day-end screen, which is when a
+pharmacist is reconciling and the one moment they will act on it.
+
+**F27, stock take with variance approval.** Two ideas carry it. The count
+is not the correction — a counter records what is on the shelf and
+somebody who can authorise it approves before the ledger moves, because
+otherwise a clipboard can rewrite a balance. And expected is frozen when
+each line is counted rather than read at approval: a pharmacy does not
+close to count, and a sale made while the counter was three aisles away
+must not appear as a discrepancy against the person who counted
+correctly.
+
+The variance threshold is **value, not unit count**. The first cut used
+ten base units, which is ten capsules — the ordinary imprecision of
+counting a shelf. Demanding a written reason for that trains people to
+type "counting error" on every line, which buries the two vials of
+insulin that actually went missing.
+
+**F10, the controlled register**, and the last three wrappers: tax rates,
+controlled quotas and patient allergies. The allergy one matters most —
+the till runs its allergy check on every sale with a known patient, and
+with nothing recorded it matched nothing and passed every time. A safety
+check that can never fire is worse than none, because it looks like it
+ran.
+
+The enum guard caught its fifth invented value on the way through:
+`ZERO_RATED` for a treatment stored as `ZERO`.
+
+### Still open
+
+**Phase 4 — import requests, RFQ broadcast, quotations, demand
+consolidation.** Landed cost and FX capture are built, so the receiving
+half works; the consolidation half is a sequence prefix and nothing else.
+It is the stated differentiator and goal G5, and it is a phase rather
+than a gap — its own run.
